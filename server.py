@@ -427,6 +427,7 @@ def main():
     print("  FilmDB 雲端伺服器（Google Sheets 版）")
     print("=" * 52)
     print(f"  PORT  : {PORT}")
+    print(f"  綁定  : 0.0.0.0:{PORT}")
     print(f"  SHEET : {SPREADSHEET_ID}")
     print(f"  Model : {MODEL}")
     print("=" * 52)
@@ -442,8 +443,10 @@ def main():
     print("  ✓ Google Sheets 連線成功")
     print()
 
+    print(f"  正在啟動伺服器於 0.0.0.0:{PORT}...")
     server = ThreadedServer(("0.0.0.0", PORT), Handler)
     try:
+        print(f"  ✓ 伺服器已啟動，等待請求...")
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n  伺服器已停止")
