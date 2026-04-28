@@ -2,10 +2,16 @@ services:
   - type: web
     name: filmdb
     runtime: python
-    buildCommand: echo "no build needed"
+    buildCommand: pip install cryptography
     startCommand: python server.py
     envVars:
       - key: GEMINI_API_KEY
         sync: false
-      - key: DB_FILE
-        value: film-db.json
+      - key: SHEETS_CREDS
+        sync: false
+      - key: SPREADSHEET_ID
+        value: 1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw
+routes:
+  - type: rewrite
+    source: /*
+    destination: /
