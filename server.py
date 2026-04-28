@@ -304,6 +304,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split('?')[0]
+        print(f"  POST 收到路徑：{path}")
         if path == "/analyze":
             self.handle_analyze()
         elif path == "/db":
@@ -311,7 +312,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/ping":
             self.send_json(200, {"ok": True})
         else:
-            self.send_json(404, {"ok": False, "error": "路徑不存在"})
+            print(f"  ⚠ 未知 POST 路徑：{path}")
+            self.send_json(404, {"ok": False, "error": f"路徑不存在：{path}"})
 
     def do_DELETE(self):
         path = self.path.split('?')[0]
