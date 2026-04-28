@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FilmDB — 電影預告片資料庫</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0e0e0f; --surface: #161618; --surface2: #1e1e21; --surface3: #252528;
+  --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.12);
+  --text: #e8e6e1; --text2: #888680; --text3: #4a4845;
+  --accent: #d4f27a; --accent-dim: rgba(212,242,122,0.1); --accent-text: #1a2600;
+  --red: #f27a7a; --red-dim: rgba(242,122,122,0.08);
+  --blue: #7ab8f2; --blue-dim: rgba(122,184,242,0.08);
+  --amber: #f2c97a;
+  --radius: 8px; --radius-lg: 12px;
+}
+html { font-size: 14px; }
+body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+.layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.sidebar-top { padding: 20px; border-bottom: 1px solid var(--border); }
+.logo { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; color: var(--accent); letter-spacing: 0.05em; }
+.logo-sub { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 2px; }
+
+.server-bar { display: flex; align-items: center; gap: 7px; padding: 7px 18px; font-size: 10.5px; font-family: 'DM Mono', monospace; border-bottom: 1px solid var(--border); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+.dot.ok { background: var(--accent); box-shadow: 0 0 5px rgba(212,242,122,0.4); }
+.dot.err { background: var(--red); }
+.dot.checking { background: var(--amber); animation: pulse 1s ease infinite; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+.nav { padding: 10px 0; flex: 1; }
+.nav-label { font-size: 9px; font-family: 'DM Mono', monospace; letter-spacing: 0.12em; color: var(--text3); text-transform: uppercase; padding: 8px 18px 4px; }
+.nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 18px; font-size: 12.5px; color: var(--text2); cursor: pointer; border-left: 2px solid transparent; transition: all 0.12s; user-select: none; }
+.nav-item:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+.nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
+.ni { width: 14px; flex-shrink: 0; opacity: 0.55; }
+.nav-item.active .ni { opacity: 1; }
+
+.sidebar-foot { padding: 14px 18px; border-top: 1px solid var(--border); }
+.stat { display: flex; justify-content: space-between; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text3); padding: 1.5px 0; }
+.stat span:last-child { color: var(--text2); }
+
+.main { padding: 28px 32px; min-height: 100vh; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; gap: 16px; }
+.page-title { font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
+.page-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+.panel { display: none; }
+.panel.active { display: block; animation: fi 0.15s ease; }
+@keyframes fi { from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none} }
+
+.btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: var(--radius); font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); transition: all 0.12s; font-family: inherit; white-space: nowrap; }
+.btn:hover { background: var(--surface3); border-color: rgba(255,255,255,0.18); }
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.38; cursor: not-allowed; transform: none !important; }
+.btn-accent { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
+.btn-accent:hover { background: #c9eb6c; }
+.btn-danger { color: var(--red); border-color: rgba(242,122,122,0.18); }
+.btn-danger:hover { background: var(--red-dim); }
+.btn-sm { padding: 4px 9px; font-size: 11px; }
+.btn-row { display: flex; gap: 7px; flex-wrap: wrap; }
+
+.search-row { display: flex; gap: 8px; margin-bottom: 18px; }
+.search-inp { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; color: var(--text); font-size: 13px; font-family: inherit; outline: none; }
+.search-inp::placeholder { color: var(--text3); }
+.search-inp:focus { border-color: var(--border2); }
+
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead tr { border-bottom: 1px solid var(--border); }
+th { text-align: left; padding: 7px 10px; font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.1em; color: var(--text3); text-transform: uppercase; font-weight: 400; white-space: nowrap; }
+td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; color: var(--text2); }
+tbody tr:hover td { background: rgba(255,255,255,0.015); }
+.td-title { color: var(--text); font-weight: 500; font-size: 12.5px; }
+.td-mono { font-family: 'DM Mono', monospace; font-size: 10px; }
+.td-acts { display: flex; gap: 3px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.chip { font-size: 10px; padding: 1px 6px; border-radius: 99px; border: 1px solid var(--border); color: var(--text3); font-family: 'DM Mono', monospace; }
+.chip.sc { border-color: rgba(122,184,242,0.28); color: var(--blue); }
+.chip.gn { border-color: rgba(212,242,122,0.28); color: var(--accent); }
+.chip.md { border-color: rgba(242,201,122,0.28); color: var(--amber); }
+.thumb { width: 60px; height: 34px; object-fit: cover; border-radius: 4px; background: var(--surface2); display: block; cursor: pointer; }
+
+.field { margin-bottom: 11px; }
+.fl { display: block; font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.08em; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
+.fi, .fta { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px; color: var(--text); font-size: 12.5px; font-family: inherit; outline: none; }
+.fi:focus, .fta:focus { border-color: var(--border2); }
+.fta { resize: vertical; min-height: 56px; line-height: 1.5; }
+.f2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fhint { font-size: 10.5px; color: var(--text3); margin-top: 3px; }
+
+.steps { display: flex; flex-direction: column; gap: 14px; max-width: 580px; }
+.step { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; transition: border-color 0.2s; }
+.step.s-active { border-color: rgba(212,242,122,0.35); }
+.step.s-done { border-color: rgba(122,184,242,0.2); opacity: 0.65; }
+.step-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.step-n { width: 20px; height: 20px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border2); font-size: 9px; font-family: 'DM Mono', monospace; color: var(--text3); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.step.s-active .step-n { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.step.s-done .step-n { background: var(--blue-dim); border-color: var(--blue); color: var(--blue); }
+.step-title { font-size: 12.5px; font-weight: 500; color: var(--text); }
+.step-desc { font-size: 11px; color: var(--text2); margin-bottom: 10px; line-height: 1.5; }
+
+.sbox { padding: 9px 12px; border-radius: var(--radius); font-size: 11px; font-family: 'DM Mono', monospace; border: 1px solid var(--border); background: var(--surface); color: var(--text2); display: none; line-height: 1.6; margin-bottom: 10px; }
+.sbox.show { display: block; }
+.sbox.loading { color: var(--amber); border-color: rgba(242,201,122,0.2); }
+.sbox.ok { color: var(--accent); border-color: rgba(212,242,122,0.2); }
+.sbox.err { color: var(--red); border-color: rgba(242,122,122,0.2); }
+
+.yt-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--blue); background: var(--blue-dim); border: 1px solid rgba(122,184,242,0.2); border-radius: 4px; padding: 2px 7px; margin-top: 4px; }
+
+.io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.io-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; }
+.io-title { font-size: 12.5px; font-weight: 500; margin-bottom: 5px; }
+.io-desc { font-size: 11px; color: var(--text2); margin-bottom: 12px; line-height: 1.5; }
+.drop-zone { border: 1px dashed var(--border2); border-radius: var(--radius); padding: 20px; text-align: center; color: var(--text3); font-size: 11.5px; cursor: pointer; transition: all 0.15s; margin-bottom: 8px; }
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
+.mo { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 50; align-items: center; justify-content: center; padding: 20px; }
+.mo.open { display: flex; }
+.mo-box { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; padding: 24px; }
+.mo-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 500; margin-bottom: 18px; }
+.mo-x { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 17px; padding: 2px 5px; border-radius: 4px; }
+.mo-x:hover { color: var(--text); background: var(--surface2); }
+
+.vm { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 100; align-items: center; justify-content: center; }
+.vm.open { display: flex; }
+.vm-box { background: #000; border-radius: 10px; overflow: hidden; width: min(700px, 95vw); }
+.vm-box iframe { display: block; width: 100%; aspect-ratio: 16/9; border: none; }
+.vm-bar { display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; background: #111; }
+.vm-title { font-size: 11px; font-family: 'DM Mono', monospace; color: #999; }
+
+.empty { text-align: center; padding: 56px 20px; color: var(--text3); }
+.empty-ico { font-size: 30px; margin-bottom: 10px; opacity: 0.35; }
+
+#toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 9px 14px; font-size: 11.5px; color: var(--text); z-index: 999; opacity: 0; transform: translateY(6px); transition: all 0.18s; pointer-events: none; font-family: 'DM Mono', monospace; }
+#toast.show { opacity: 1; transform: translateY(0); }
+#toast.ok { border-color: rgba(212,242,122,0.3); color: var(--accent); }
+#toast.err { border-color: rgba(242,122,122,0.3); color: var(--red); }
+
+.spin { display: inline-block; width: 11px; height: 11px; border: 1.5px solid rgba(255,255,255,0.15); border-top-color: var(--amber); border-radius: 50%; animation: rot 0.65s linear infinite; vertical-align: middle; margin-right: 5px; }
+@keyframes rot { to{transform:rotate(360deg)} }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="layout">
+<aside class="sidebar">
+  <div class="sidebar-top">
+    <div class="logo">FilmDB</div>
+    <div class="logo-sub">展覽資料庫工具 v4.0</div>
+  </div>
+  <div class="server-bar">
+    <div class="dot checking" id="srv-dot"></div>
+    <span id="srv-text" style="color:var(--text3)">連線中...</span>
+  </div>
+  <nav class="nav">
+    <div class="nav-label">資料庫</div>
+    <div class="nav-item active" onclick="go('list',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/><line x1="5" y1="5" x2="5" y2="15"/></svg>總覽
+    </div>
+    <div class="nav-item" onclick="go('add',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="7"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/></svg>新增電影
+    </div>
+    <div class="nav-label" style="margin-top:6px">工具</div>
+    <div class="nav-item" onclick="go('io',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="4,6 8,2 12,6"/><line x1="8" y1="2" x2="8" y2="10"/><line x1="2" y1="13" x2="14" y2="13"/></svg>匯出 / 匯入
+    </div>
+  </nav>
+  <div class="sidebar-foot">
+    <div class="stat"><span>電影總數</span><span id="s-count">—</span></div>
+    <div class="stat"><span>場景標籤</span><span id="s-scenes">—</span></div>
+    <div class="stat"><span>類型標籤</span><span id="s-genres">—</span></div>
+  </div>
+</aside>
+
+<main class="main">
+
+  <!-- LIST -->
+  <div id="panel-list" class="panel active">
+    <div class="page-head">
+      <div><div class="page-title">資料庫總覽</div><div class="page-sub">所有裝置共用同一份雲端資料庫，即時同步</div></div>
+      <div class="btn-row">
+        <button class="btn btn-sm" onclick="loadDb()">↻ 重新整理</button>
+        <button class="btn btn-accent" onclick="go('add',null)">＋ 新增電影</button>
+      </div>
+    </div>
+    <div class="search-row">
+      <input class="search-inp" id="list-q" type="text" placeholder="搜尋電影名稱、場景、類型..." oninput="renderList()">
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:66px">縮圖</th><th>電影名稱</th>
+          <th>場景</th><th>類型／情感</th><th style="width:96px">操作</th>
+        </tr></thead>
+        <tbody id="list-body"></tbody>
+      </table>
+    </div>
+    <div id="list-empty" class="empty" style="display:none">
+      <div class="empty-ico">🎬</div>
+      <div style="font-size:12px">資料庫是空的，先新增電影或匯入 JSON</div>
+    </div>
+  </div>
+
+  <!-- ADD -->
+  <div id="panel-add" class="panel">
+    <div class="page-head">
+      <div><div class="page-title">新增電影</div><div class="page-sub">Gemini 分析完後自動存入雲端，所有裝置立即可見</div></div>
+    </div>
+    <div class="steps">
+      <div class="step s-active" id="s1">
+        <div class="step-head"><div class="step-n">1</div><div class="step-title">輸入 YouTube 預告片網址</div></div>
+        <div class="step-desc">貼上完整連結，Gemini 會直接分析影片產生場景、類型、情感標籤</div>
+        <div class="field">
+          <input class="fi" id="f-url" type="text" placeholder="https://www.youtube.com/watch?v=..." oninput="onUrl()">
+          <div id="yt-tag" style="min-height:20px;margin-top:4px"></div>
+        </div>
+        <button class="btn btn-accent" id="btn-analyze" onclick="analyze()" disabled>✦ 開始分析影片</button>
+      </div>
+      <div class="step" id="s2" style="display:none">
+        <div class="step-head"><div class="step-n">2</div><div class="step-title">Gemini 分析中</div></div>
+        <div class="sbox show loading" id="analyze-status">
+          <span class="spin"></span><span id="analyze-msg">Gemini 正在分析影片內容（約 15-40 秒）...</span>
+        </div>
+      </div>
+      <div class="step" id="s3" style="display:none">
+        <div class="step-head"><div class="step-n">3</div><div class="step-title">確認並儲存標籤</div></div>
+        <div class="step-desc">Gemini 從影片直接產生的標籤，可以直接修改</div>
+        <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="f-title" type="text"></div>
+        <div class="field"><label class="fl">簡介</label><textarea class="fta" id="f-desc" rows="2"></textarea></div>
+        <div class="field">
+          <label class="fl">主要場景</label>
+          <input class="fi" id="f-scenes-main" type="text">
+          <div class="fhint">最具代表性的 1-2 個主場景</div>
+        </div>
+        <div class="field"><label class="fl">次要場景</label><input class="fi" id="f-scenes-sub" type="text"></div>
+        <div class="field"><label class="fl">類型關鍵字</label><input class="fi" id="f-genres" type="text"></div>
+        <div class="field"><label class="fl">情感／氛圍</label><input class="fi" id="f-moods" type="text"></div>
+        <div class="btn-row">
+          <button class="btn btn-accent" onclick="saveEntry()">✓ 儲存到雲端資料庫</button>
+          <button class="btn" onclick="resetAdd()">重新開始</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IO -->
+  <div id="panel-io" class="panel">
+    <div class="page-head"><div><div class="page-title">匯出 / 匯入</div><div class="page-sub">備份雲端資料庫或批次匯入</div></div></div>
+    <div class="io-grid">
+      <div class="io-card">
+        <div class="io-title">📤 匯出 JSON</div>
+        <div class="io-desc">下載目前雲端資料庫為 JSON 檔案備份。</div>
+        <div class="btn-row">
+          <button class="btn btn-accent" onclick="exportDb()">下載 film-db.json</button>
+          <button class="btn btn-sm" onclick="copyDb()">複製到剪貼簿</button>
+        </div>
+      </div>
+      <div class="io-card">
+        <div class="io-title">📥 匯入 JSON</div>
+        <div class="io-desc">把本地 JSON 批次上傳到雲端。支援合併或覆蓋。</div>
+        <div class="drop-zone" id="dz" onclick="document.getElementById('file-inp').click()" ondragover="dzOver(event)" ondragleave="dzLeave()" ondrop="dzDrop(event)">
+          點擊選擇 JSON 檔案<br><span style="font-size:10px;opacity:0.5">或拖曳到這裡</span>
+        </div>
+        <input type="file" id="file-inp" accept=".json" style="display:none" onchange="fileSelect(event)">
+        <div class="btn-row" id="import-btns" style="display:none">
+          <button class="btn btn-sm" onclick="doImport('merge')">合併匯入</button>
+          <button class="btn btn-sm btn-danger" onclick="doImport('overwrite')">覆蓋匯入</button>
+        </div>
+        <div id="import-info" style="margin-top:7px;font-size:10.5px;color:var(--text2);display:none"></div>
+      </div>
+    </div>
+    <div style="margin-top:13px">
+      <div class="io-card" style="border-color:rgba(242,122,122,0.15)">
+        <div class="io-title" style="color:var(--red)">⚠ 清空資料庫</div>
+        <div class="io-desc">無法復原，請先匯出備份。</div>
+        <button class="btn btn-danger" onclick="clearAll()">清空雲端資料庫</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="mo" id="edit-mo">
+  <div class="mo-box">
+    <div class="mo-head"><span>編輯電影</span><button class="mo-x" onclick="closeEdit()">✕</button></div>
+    <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="e-title" type="text"></div>
+    <div class="field"><label class="fl">YouTube 網址</label><input class="fi" id="e-url" type="text"></div>
+    <div class="field"><label class="fl">簡介</label><textarea class="fta" id="e-desc" rows="2"></textarea></div>
+    <div class="field"><label class="fl">主要場景</label><input class="fi" id="e-scenes-main" type="text"></div>
+    <div class="field"><label class="fl">次要場景</label><input class="fi" id="e-scenes-sub" type="text"></div>
+    <div class="field"><label class="fl">類型關鍵字</label><input class="fi" id="e-genres" type="text"></div>
+    <div class="field"><label class="fl">情感／氛圍</label><input class="fi" id="e-moods" type="text"></div>
+    <div class="btn-row"><button class="btn btn-accent" onclick="saveEdit()">儲存</button><button class="btn" onclick="closeEdit()">取消</button></div>
+  </div>
+</div>
+
+<!-- VIDEO MODAL -->
+<div class="vm" id="video-mo" onclick="if(event.target===this)closeVideo()">
+  <div class="vm-box">
+    <div class="vm-bar"><span class="vm-title" id="vm-title"></span><button class="btn btn-sm" onclick="closeVideo()">關閉</button></div>
+    <iframe id="yt-frame" src="" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── 伺服器位址（部署後改成 Render 的網址）────────────────────────
+const API = window.location.origin;  // 自動對應當前網址
+// ────────────────────────────────────────────────────────────────
+
+let db = [];
+let editId = null;
+let pendingImport = null;
+let curYtId = '';
+let serverOnline = false;
+
+// ── API 呼叫 ──────────────────────────────────────────────────────
+async function apiFetch(path, options = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options
+  });
+  return res.json();
+}
+
+// ── 載入資料庫 ────────────────────────────────────────────────────
+async function loadDb() {
+  try {
+    const r = await apiFetch('/db');
+    if (r.ok) {
+      db = r.data;
+      updateStats();
+      renderList();
+    }
+  } catch(e) {
+    console.error('載入失敗', e);
+  }
+}
+
+function updateStats() {
+  const sc = new Set(), gn = new Set();
+  db.forEach(m => {
+    (m.scenes||[]).forEach(t=>sc.add(t));
+    (m.genres||[]).forEach(t=>gn.add(t));
+    (m.moods||[]).forEach(t=>gn.add(t));
+  });
+  document.getElementById('s-count').textContent = db.length;
+  document.getElementById('s-scenes').textContent = sc.size;
+  document.getElementById('s-genres').textContent = gn.size;
+}
+
+// ── 伺服器狀態 ────────────────────────────────────────────────────
+async function checkServer() {
+  try {
+    const r = await fetch(API + '/ping', { signal: AbortSignal.timeout(4000) });
+    const d = await r.json();
+    serverOnline = d.ok === true;
+  } catch(e) {
+    serverOnline = false;
+  }
+  const dot = document.getElementById('srv-dot');
+  const txt = document.getElementById('srv-text');
+  if (serverOnline) {
+    dot.className = 'dot ok';
+    txt.textContent = '雲端連線中';
+    txt.style.color = 'var(--accent)';
+  } else {
+    dot.className = 'dot err';
+    txt.textContent = '無法連線';
+    txt.style.color = 'var(--red)';
+  }
+}
+
+// ── NAV ───────────────────────────────────────────────────────────
+function go(name, el) {
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  if (el) el.classList.add('active');
+  else {
+    const map = {list:0, add:1, io:2};
+    document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
+  }
+  if (name === 'list') loadDb();
+  if (name === 'add') resetAdd();
+}
+
+// ── LIST ──────────────────────────────────────────────────────────
+function renderList() {
+  const q = document.getElementById('list-q').value.trim().toLowerCase();
+  const rows = q ? db.filter(m =>
+    [m.title, m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
+  ) : [...db];
+
+  const body = document.getElementById('list-body');
+  const empty = document.getElementById('list-empty');
+  if (!rows.length) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  body.innerHTML = rows.map(m => `
+    <tr>
+      <td><img class="thumb" src="https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg"
+        onclick="playVideo('${m.ytId}','${esc(m.title)}')" title="點擊預覽"
+        onerror="this.style.background='#222'"></td>
+      <td>
+        <div class="td-title">${m.title}</div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:1px">${m.desc ? m.desc.slice(0,36)+(m.desc.length>36?'…':'') : ''}</div>
+      </td>
+      <td><div class="chips">${(m.scenes||[]).slice(0,3).map(t=>`<span class="chip sc">${t}</span>`).join('')}</div></td>
+      <td><div class="chips">
+        ${(m.genres||[]).slice(0,2).map(t=>`<span class="chip gn">${t}</span>`).join('')}
+        ${(m.moods||[]).slice(0,2).map(t=>`<span class="chip md">${t}</span>`).join('')}
+      </div></td>
+      <td><div class="td-acts">
+        <button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
+        <button class="btn btn-sm btn-danger" onclick="del('${m.id}','${esc(m.title)}')">刪</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+async function del(id, title) {
+  if (!confirm(`確定刪除「${title}」？`)) return;
+  try {
+    await apiFetch('/db/'+id, { method: 'DELETE' });
+    await loadDb();
+    toast('已刪除：'+title);
+  } catch(e) { toast('刪除失敗','err'); }
+}
+
+// ── ADD ───────────────────────────────────────────────────────────
+function resetAdd() {
+  curYtId = '';
+  document.getElementById('f-url').value = '';
+  document.getElementById('yt-tag').innerHTML = '';
+  document.getElementById('btn-analyze').disabled = true;
+  document.getElementById('s1').className = 'step s-active';
+  document.getElementById('s2').style.display = 'none';
+  document.getElementById('s3').style.display = 'none';
+  ['f-title','f-desc','f-scenes-main','f-scenes-sub','f-genres','f-moods'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+}
+
+function onUrl() {
+  const url = document.getElementById('f-url').value.trim();
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+  curYtId = m ? m[1] : '';
+  document.getElementById('yt-tag').innerHTML = curYtId ? `<div class="yt-tag">▶ ID: ${curYtId}</div>` : '';
+  document.getElementById('btn-analyze').disabled = !curYtId;
+}
+
+async function analyze() {
+  document.getElementById('btn-analyze').disabled = true;
+  document.getElementById('s1').className = 'step s-done';
+  document.getElementById('s2').style.display = 'block';
+
+  try {
+    const ytUrl = document.getElementById('f-url').value.trim();
+    const r = await apiFetch('/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ url: ytUrl })
+    });
+    if (!r.ok) throw new Error(r.error || '分析失敗');
+
+    const p = r.data;
+    document.getElementById('f-title').value = p.title || '';
+    document.getElementById('f-desc').value = p.desc || '';
+    document.getElementById('f-scenes-main').value = join(p.scenes_main);
+    document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
+    document.getElementById('f-genres').value = join(p.genres);
+    document.getElementById('f-moods').value = join(p.moods);
+
+    document.getElementById('s2').style.display = 'none';
+    document.getElementById('s3').style.display = 'block';
+    document.getElementById('s3').className = 'step s-active';
+
+  } catch(e) {
+    const st = document.getElementById('analyze-status');
+    st.className = 'sbox show err';
+    st.textContent = '✗ ' + e.message;
+    document.getElementById('btn-analyze').disabled = false;
+    document.getElementById('s1').className = 'step s-active';
+  }
+}
+
+async function saveEntry() {
+  const title = document.getElementById('f-title').value.trim();
+  if (!title) { toast('請填寫電影名稱', 'err'); return; }
+  if (!curYtId) { toast('YouTube ID 遺失', 'err'); return; }
+
+  const sm = split(document.getElementById('f-scenes-main').value);
+  const ss = split(document.getElementById('f-scenes-sub').value);
+  const entry = {
+    ytId: curYtId,
+    url: document.getElementById('f-url').value.trim(),
+    title,
+    desc: document.getElementById('f-desc').value.trim(),
+    scenesMain: sm, scenesSub: ss, scenes: [...sm, ...ss],
+    genres: split(document.getElementById('f-genres').value),
+    moods: split(document.getElementById('f-moods').value)
+  };
+
+  try {
+    const r = await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
+    if (!r.ok) throw new Error(r.error);
+    toast('已新增：' + title, 'ok');
+    await loadDb();
+    go('list', document.querySelectorAll('.nav-item')[0]);
+  } catch(e) { toast('儲存失敗：' + e.message, 'err'); }
+}
+
+// ── EDIT ──────────────────────────────────────────────────────────
+function openEdit(id) {
+  const m = db.find(x=>x.id===id); if (!m) return;
+  editId = id;
+  document.getElementById('e-title').value = m.title;
+  document.getElementById('e-url').value = m.url || ('https://www.youtube.com/watch?v=' + m.ytId);
+  document.getElementById('e-desc').value = m.desc || '';
+  document.getElementById('e-scenes-main').value = join(m.scenesMain||[]);
+  document.getElementById('e-scenes-sub').value = join(m.scenesSub||[]);
+  document.getElementById('e-genres').value = join(m.genres);
+  document.getElementById('e-moods').value = join(m.moods);
+  document.getElementById('edit-mo').classList.add('open');
+}
+function closeEdit() { document.getElementById('edit-mo').classList.remove('open'); editId = null; }
+
+async function saveEdit() {
+  if (!editId) return;
+  const m = db.find(x=>x.id===editId); if (!m) return;
+  const eUrl = document.getElementById('e-url').value.trim();
+  const eYtMatch = eUrl.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+  const sm = split(document.getElementById('e-scenes-main').value);
+  const ss = split(document.getElementById('e-scenes-sub').value);
+  const updated = {
+    ...m,
+    title: document.getElementById('e-title').value.trim(),
+    url: eUrl,
+    ytId: eYtMatch ? eYtMatch[1] : m.ytId,
+    desc: document.getElementById('e-desc').value.trim(),
+    scenesMain: sm, scenesSub: ss, scenes: [...sm, ...ss],
+    genres: split(document.getElementById('e-genres').value),
+    moods: split(document.getElementById('e-moods').value)
+  };
+  try {
+    await apiFetch('/db', { method: 'POST', body: JSON.stringify(updated) });
+    toast('已儲存', 'ok');
+    closeEdit();
+    await loadDb();
+  } catch(e) { toast('儲存失敗', 'err'); }
+}
+
+// ── VIDEO ─────────────────────────────────────────────────────────
+function playVideo(ytId, title) {
+  document.getElementById('vm-title').textContent = title;
+  document.getElementById('yt-frame').src = `https://www.youtube.com/embed/${ytId}?autoplay=1`;
+  document.getElementById('video-mo').classList.add('open');
+}
+function closeVideo() {
+  document.getElementById('video-mo').classList.remove('open');
+  document.getElementById('yt-frame').src = '';
+}
+
+// ── IO ────────────────────────────────────────────────────────────
+async function exportDb() {
+  const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'film-db.json'; a.click();
+  toast('已下載 film-db.json', 'ok');
+}
+function copyDb() {
+  navigator.clipboard.writeText(JSON.stringify(db, null, 2)).then(()=>toast('JSON 已複製','ok')).catch(()=>toast('複製失敗','err'));
+}
+function dzOver(e) { e.preventDefault(); document.getElementById('dz').classList.add('drag-over'); }
+function dzLeave() { document.getElementById('dz').classList.remove('drag-over'); }
+function dzDrop(e) { e.preventDefault(); dzLeave(); readFile(e.dataTransfer.files[0]); }
+function fileSelect(e) { readFile(e.target.files[0]); }
+function readFile(file) {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      pendingImport = JSON.parse(ev.target.result);
+      if (!Array.isArray(pendingImport)) throw new Error();
+      document.getElementById('import-info').style.display = 'block';
+      document.getElementById('import-info').textContent = `已讀取 ${pendingImport.length} 筆，選擇匯入方式：`;
+      document.getElementById('import-btns').style.display = 'flex';
+    } catch { toast('JSON 格式錯誤', 'err'); }
+  };
+  r.readAsText(file);
+}
+
+async function doImport(mode) {
+  if (!pendingImport) return;
+  let toUpload = pendingImport;
+
+  if (mode === 'overwrite') {
+    if (!confirm(`確定覆蓋目前 ${db.length} 筆？`)) return;
+    // 先清空再上傳
+    for (const m of db) {
+      await apiFetch('/db/' + m.id, { method: 'DELETE' }).catch(()=>{});
+    }
+  } else {
+    // 合併：只上傳不存在的
+    const existIds = new Set(db.map(m=>m.id));
+    toUpload = pendingImport.filter(m => !existIds.has(m.id));
+  }
+
+  let count = 0;
+  for (const m of toUpload) {
+    await apiFetch('/db', { method: 'POST', body: JSON.stringify(m) }).catch(()=>{});
+    count++;
+  }
+
+  await loadDb();
+  toast(`匯入完成，${mode === 'overwrite' ? '覆蓋' : '新增'} ${count} 筆`, 'ok');
+  pendingImport = null;
+  document.getElementById('import-btns').style.display = 'none';
+  document.getElementById('import-info').style.display = 'none';
+  document.getElementById('file-inp').value = '';
+}
+
+async function clearAll() {
+  if (!confirm(`確定清空全部 ${db.length} 筆？`)) return;
+  for (const m of db) {
+    await apiFetch('/db/' + m.id, { method: 'DELETE' }).catch(()=>{});
+  }
+  await loadDb();
+  toast('資料庫已清空');
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────
+function split(s) { return s.split(/[,，、\s]+/).map(x=>x.trim()).filter(Boolean); }
+function join(a) { return (a||[]).join('、'); }
+function esc(s) { return (s||'').replace(/'/g,"\\'"); }
+
+let tt;
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show ' + type;
+  clearTimeout(tt); tt = setTimeout(()=>el.className='', 2400);
+}
+
+// ── INIT ──────────────────────────────────────────────────────────
+checkServer();
+loadDb();
+setInterval(checkServer, 30000);
+</script>
+</body>
+</html>

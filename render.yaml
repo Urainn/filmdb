@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: filmdb
+    runtime: python
+    buildCommand: echo "no build needed"
+    startCommand: python server.py
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DB_FILE
+        value: film-db.json
