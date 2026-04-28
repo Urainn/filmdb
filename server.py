@@ -15,6 +15,7 @@ import os
 import time
 import threading
 import base64
+import sys
 
 # ── 環境變數設定 ──────────────────────────────────────────────────
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
@@ -333,7 +334,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"ok": False, "error": "not found"})
 
     def handle_db_add(self):
+        import sys
         body = self.read_body()
+        print(f"  📥 handle_db_add 收到：{body.get('title')}", flush=True)
         if not body.get('title') or not body.get('ytId'):
             self.send_json(400, {"ok": False, "error": "缺少必要欄位"})
             return
@@ -422,6 +425,9 @@ class ThreadedServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 def main():
+    import sys
+    # 強制 stdout 不緩衝，確保 Render Logs 能看到
+    sys.stdout.reconfigure(line_buffering=True)
     print()
     print("=" * 52)
     print("  FilmDB 雲端伺服器（Google Sheets 版）")
