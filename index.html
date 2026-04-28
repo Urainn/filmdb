@@ -19,20 +19,20 @@
 }
 html { font-size: 14px; }
 body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-
+ 
 .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .sidebar-top { padding: 20px; border-bottom: 1px solid var(--border); }
 .logo { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; color: var(--accent); letter-spacing: 0.05em; }
 .logo-sub { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; margin-top: 2px; }
-
+ 
 .server-bar { display: flex; align-items: center; gap: 7px; padding: 7px 18px; font-size: 10.5px; font-family: 'DM Mono', monospace; border-bottom: 1px solid var(--border); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
 .dot.ok { background: var(--accent); box-shadow: 0 0 5px rgba(212,242,122,0.4); }
 .dot.err { background: var(--red); }
 .dot.checking { background: var(--amber); animation: pulse 1s ease infinite; }
 @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
-
+ 
 .nav { padding: 10px 0; flex: 1; }
 .nav-label { font-size: 9px; font-family: 'DM Mono', monospace; letter-spacing: 0.12em; color: var(--text3); text-transform: uppercase; padding: 8px 18px 4px; }
 .nav-item { display: flex; align-items: center; gap: 9px; padding: 8px 18px; font-size: 12.5px; color: var(--text2); cursor: pointer; border-left: 2px solid transparent; transition: all 0.12s; user-select: none; }
@@ -40,20 +40,20 @@ body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: va
 .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
 .ni { width: 14px; flex-shrink: 0; opacity: 0.55; }
 .nav-item.active .ni { opacity: 1; }
-
+ 
 .sidebar-foot { padding: 14px 18px; border-top: 1px solid var(--border); }
 .stat { display: flex; justify-content: space-between; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text3); padding: 1.5px 0; }
 .stat span:last-child { color: var(--text2); }
-
+ 
 .main { padding: 28px 32px; min-height: 100vh; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; gap: 16px; }
 .page-title { font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
 .page-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
-
+ 
 .panel { display: none; }
 .panel.active { display: block; animation: fi 0.15s ease; }
 @keyframes fi { from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none} }
-
+ 
 .btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: var(--radius); font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border2); background: var(--surface2); color: var(--text); transition: all 0.12s; font-family: inherit; white-space: nowrap; }
 .btn:hover { background: var(--surface3); border-color: rgba(255,255,255,0.18); }
 .btn:active { transform: scale(0.98); }
@@ -64,12 +64,12 @@ body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: va
 .btn-danger:hover { background: var(--red-dim); }
 .btn-sm { padding: 4px 9px; font-size: 11px; }
 .btn-row { display: flex; gap: 7px; flex-wrap: wrap; }
-
+ 
 .search-row { display: flex; gap: 8px; margin-bottom: 18px; }
 .search-inp { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; color: var(--text); font-size: 13px; font-family: inherit; outline: none; }
 .search-inp::placeholder { color: var(--text3); }
 .search-inp:focus { border-color: var(--border2); }
-
+ 
 .tbl-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 thead tr { border-bottom: 1px solid var(--border); }
@@ -79,14 +79,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .td-title { color: var(--text); font-weight: 500; font-size: 12.5px; }
 .td-mono { font-family: 'DM Mono', monospace; font-size: 10px; }
 .td-acts { display: flex; gap: 3px; }
-
+ 
 .chips { display: flex; flex-wrap: wrap; gap: 3px; }
 .chip { font-size: 10px; padding: 1px 6px; border-radius: 99px; border: 1px solid var(--border); color: var(--text3); font-family: 'DM Mono', monospace; }
 .chip.sc { border-color: rgba(122,184,242,0.28); color: var(--blue); }
 .chip.gn { border-color: rgba(212,242,122,0.28); color: var(--accent); }
 .chip.md { border-color: rgba(242,201,122,0.28); color: var(--amber); }
 .thumb { width: 60px; height: 34px; object-fit: cover; border-radius: 4px; background: var(--surface2); display: block; cursor: pointer; }
-
+ 
 .field { margin-bottom: 11px; }
 .fl { display: block; font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.08em; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
 .fi, .fta { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px; color: var(--text); font-size: 12.5px; font-family: inherit; outline: none; }
@@ -94,7 +94,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .fta { resize: vertical; min-height: 56px; line-height: 1.5; }
 .f2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .fhint { font-size: 10.5px; color: var(--text3); margin-top: 3px; }
-
+ 
 .steps { display: flex; flex-direction: column; gap: 14px; max-width: 580px; }
 .step { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; transition: border-color 0.2s; }
 .step.s-active { border-color: rgba(212,242,122,0.35); }
@@ -105,47 +105,47 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .step.s-done .step-n { background: var(--blue-dim); border-color: var(--blue); color: var(--blue); }
 .step-title { font-size: 12.5px; font-weight: 500; color: var(--text); }
 .step-desc { font-size: 11px; color: var(--text2); margin-bottom: 10px; line-height: 1.5; }
-
+ 
 .sbox { padding: 9px 12px; border-radius: var(--radius); font-size: 11px; font-family: 'DM Mono', monospace; border: 1px solid var(--border); background: var(--surface); color: var(--text2); display: none; line-height: 1.6; margin-bottom: 10px; }
 .sbox.show { display: block; }
 .sbox.loading { color: var(--amber); border-color: rgba(242,201,122,0.2); }
 .sbox.ok { color: var(--accent); border-color: rgba(212,242,122,0.2); }
 .sbox.err { color: var(--red); border-color: rgba(242,122,122,0.2); }
-
+ 
 .yt-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--blue); background: var(--blue-dim); border: 1px solid rgba(122,184,242,0.2); border-radius: 4px; padding: 2px 7px; margin-top: 4px; }
-
+ 
 .io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .io-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; }
 .io-title { font-size: 12.5px; font-weight: 500; margin-bottom: 5px; }
 .io-desc { font-size: 11px; color: var(--text2); margin-bottom: 12px; line-height: 1.5; }
 .drop-zone { border: 1px dashed var(--border2); border-radius: var(--radius); padding: 20px; text-align: center; color: var(--text3); font-size: 11.5px; cursor: pointer; transition: all 0.15s; margin-bottom: 8px; }
 .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
-
+ 
 .mo { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 50; align-items: center; justify-content: center; padding: 20px; }
 .mo.open { display: flex; }
 .mo-box { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; padding: 24px; }
 .mo-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 500; margin-bottom: 18px; }
 .mo-x { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 17px; padding: 2px 5px; border-radius: 4px; }
 .mo-x:hover { color: var(--text); background: var(--surface2); }
-
+ 
 .vm { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 100; align-items: center; justify-content: center; }
 .vm.open { display: flex; }
 .vm-box { background: #000; border-radius: 10px; overflow: hidden; width: min(700px, 95vw); }
 .vm-box iframe { display: block; width: 100%; aspect-ratio: 16/9; border: none; }
 .vm-bar { display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; background: #111; }
 .vm-title { font-size: 11px; font-family: 'DM Mono', monospace; color: #999; }
-
+ 
 .empty { text-align: center; padding: 56px 20px; color: var(--text3); }
 .empty-ico { font-size: 30px; margin-bottom: 10px; opacity: 0.35; }
-
+ 
 #toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 9px 14px; font-size: 11.5px; color: var(--text); z-index: 999; opacity: 0; transform: translateY(6px); transition: all 0.18s; pointer-events: none; font-family: 'DM Mono', monospace; }
 #toast.show { opacity: 1; transform: translateY(0); }
 #toast.ok { border-color: rgba(212,242,122,0.3); color: var(--accent); }
 #toast.err { border-color: rgba(242,122,122,0.3); color: var(--red); }
-
+ 
 .spin { display: inline-block; width: 11px; height: 11px; border: 1.5px solid rgba(255,255,255,0.15); border-top-color: var(--amber); border-radius: 50%; animation: rot 0.65s linear infinite; vertical-align: middle; margin-right: 5px; }
 @keyframes rot { to{transform:rotate(360deg)} }
-
+ 
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 </style>
@@ -180,9 +180,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="stat"><span>類型標籤</span><span id="s-genres">—</span></div>
   </div>
 </aside>
-
+ 
 <main class="main">
-
+ 
   <!-- LIST -->
   <div id="panel-list" class="panel active">
     <div class="page-head">
@@ -209,7 +209,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="font-size:12px">資料庫是空的，先新增電影或匯入 JSON</div>
     </div>
   </div>
-
+ 
   <!-- ADD -->
   <div id="panel-add" class="panel">
     <div class="page-head">
@@ -251,7 +251,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
     </div>
   </div>
-
+ 
   <!-- IO -->
   <div id="panel-io" class="panel">
     <div class="page-head"><div><div class="page-title">匯出 / 匯入</div><div class="page-sub">備份雲端資料庫或批次匯入</div></div></div>
@@ -286,10 +286,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
     </div>
   </div>
-
+ 
 </main>
 </div>
-
+ 
 <!-- EDIT MODAL -->
 <div class="mo" id="edit-mo">
   <div class="mo-box">
@@ -304,7 +304,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="btn-row"><button class="btn btn-accent" onclick="saveEdit()">儲存</button><button class="btn" onclick="closeEdit()">取消</button></div>
   </div>
 </div>
-
+ 
 <!-- VIDEO MODAL -->
 <div class="vm" id="video-mo" onclick="if(event.target===this)closeVideo()">
   <div class="vm-box">
@@ -312,29 +312,35 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <iframe id="yt-frame" src="" allowfullscreen allow="autoplay; encrypted-media"></iframe>
   </div>
 </div>
-
+ 
 <div id="toast"></div>
-
+ 
 <script>
 // ── 伺服器位址（部署後改成 Render 的網址）────────────────────────
 const API = window.location.origin;  // 自動對應當前網址
 // ────────────────────────────────────────────────────────────────
-
+ 
 let db = [];
 let editId = null;
 let pendingImport = null;
 let curYtId = '';
 let serverOnline = false;
-
+ 
 // ── API 呼叫 ──────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
     ...options
   });
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch(e) {
+    console.error('API 回傳非 JSON：', text.slice(0, 200));
+    throw new Error('伺服器回傳格式錯誤：' + text.slice(0, 100));
+  }
 }
-
+ 
 // ── 載入資料庫 ────────────────────────────────────────────────────
 async function loadDb() {
   try {
@@ -348,7 +354,7 @@ async function loadDb() {
     console.error('載入失敗', e);
   }
 }
-
+ 
 function updateStats() {
   const sc = new Set(), gn = new Set();
   db.forEach(m => {
@@ -360,7 +366,7 @@ function updateStats() {
   document.getElementById('s-scenes').textContent = sc.size;
   document.getElementById('s-genres').textContent = gn.size;
 }
-
+ 
 // ── 伺服器狀態 ────────────────────────────────────────────────────
 async function checkServer() {
   try {
@@ -382,7 +388,7 @@ async function checkServer() {
     txt.style.color = 'var(--red)';
   }
 }
-
+ 
 // ── NAV ───────────────────────────────────────────────────────────
 function go(name, el) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -396,19 +402,19 @@ function go(name, el) {
   if (name === 'list') loadDb();
   if (name === 'add') resetAdd();
 }
-
+ 
 // ── LIST ──────────────────────────────────────────────────────────
 function renderList() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   const rows = q ? db.filter(m =>
     [m.title, m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
   ) : [...db];
-
+ 
   const body = document.getElementById('list-body');
   const empty = document.getElementById('list-empty');
   if (!rows.length) { body.innerHTML = ''; empty.style.display = 'block'; return; }
   empty.style.display = 'none';
-
+ 
   body.innerHTML = rows.map(m => `
     <tr>
       <td><img class="thumb" src="https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg"
@@ -429,7 +435,7 @@ function renderList() {
       </div></td>
     </tr>`).join('');
 }
-
+ 
 async function del(id, title) {
   if (!confirm(`確定刪除「${title}」？`)) return;
   try {
@@ -438,7 +444,7 @@ async function del(id, title) {
     toast('已刪除：'+title);
   } catch(e) { toast('刪除失敗','err'); }
 }
-
+ 
 // ── ADD ───────────────────────────────────────────────────────────
 function resetAdd() {
   curYtId = '';
@@ -452,7 +458,7 @@ function resetAdd() {
     document.getElementById(id).value = '';
   });
 }
-
+ 
 function onUrl() {
   const url = document.getElementById('f-url').value.trim();
   const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
@@ -460,12 +466,12 @@ function onUrl() {
   document.getElementById('yt-tag').innerHTML = curYtId ? `<div class="yt-tag">▶ ID: ${curYtId}</div>` : '';
   document.getElementById('btn-analyze').disabled = !curYtId;
 }
-
+ 
 async function analyze() {
   document.getElementById('btn-analyze').disabled = true;
   document.getElementById('s1').className = 'step s-done';
   document.getElementById('s2').style.display = 'block';
-
+ 
   try {
     const ytUrl = document.getElementById('f-url').value.trim();
     const r = await apiFetch('/analyze', {
@@ -473,7 +479,7 @@ async function analyze() {
       body: JSON.stringify({ url: ytUrl })
     });
     if (!r.ok) throw new Error(r.error || '分析失敗');
-
+ 
     const p = r.data;
     document.getElementById('f-title').value = p.title || '';
     document.getElementById('f-desc').value = p.desc || '';
@@ -481,11 +487,11 @@ async function analyze() {
     document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
     document.getElementById('f-genres').value = join(p.genres);
     document.getElementById('f-moods').value = join(p.moods);
-
+ 
     document.getElementById('s2').style.display = 'none';
     document.getElementById('s3').style.display = 'block';
     document.getElementById('s3').className = 'step s-active';
-
+ 
   } catch(e) {
     const st = document.getElementById('analyze-status');
     st.className = 'sbox show err';
@@ -494,12 +500,12 @@ async function analyze() {
     document.getElementById('s1').className = 'step s-active';
   }
 }
-
+ 
 async function saveEntry() {
   const title = document.getElementById('f-title').value.trim();
   if (!title) { toast('請填寫電影名稱', 'err'); return; }
   if (!curYtId) { toast('YouTube ID 遺失', 'err'); return; }
-
+ 
   const sm = split(document.getElementById('f-scenes-main').value);
   const ss = split(document.getElementById('f-scenes-sub').value);
   const entry = {
@@ -511,7 +517,7 @@ async function saveEntry() {
     genres: split(document.getElementById('f-genres').value),
     moods: split(document.getElementById('f-moods').value)
   };
-
+ 
   try {
     const r = await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
     if (!r.ok) throw new Error(r.error);
@@ -520,7 +526,7 @@ async function saveEntry() {
     go('list', document.querySelectorAll('.nav-item')[0]);
   } catch(e) { toast('儲存失敗：' + e.message, 'err'); }
 }
-
+ 
 // ── EDIT ──────────────────────────────────────────────────────────
 function openEdit(id) {
   const m = db.find(x=>x.id===id); if (!m) return;
@@ -535,7 +541,7 @@ function openEdit(id) {
   document.getElementById('edit-mo').classList.add('open');
 }
 function closeEdit() { document.getElementById('edit-mo').classList.remove('open'); editId = null; }
-
+ 
 async function saveEdit() {
   if (!editId) return;
   const m = db.find(x=>x.id===editId); if (!m) return;
@@ -560,7 +566,7 @@ async function saveEdit() {
     await loadDb();
   } catch(e) { toast('儲存失敗', 'err'); }
 }
-
+ 
 // ── VIDEO ─────────────────────────────────────────────────────────
 function playVideo(ytId, title) {
   document.getElementById('vm-title').textContent = title;
@@ -571,7 +577,7 @@ function closeVideo() {
   document.getElementById('video-mo').classList.remove('open');
   document.getElementById('yt-frame').src = '';
 }
-
+ 
 // ── IO ────────────────────────────────────────────────────────────
 async function exportDb() {
   const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
@@ -599,11 +605,11 @@ function readFile(file) {
   };
   r.readAsText(file);
 }
-
+ 
 async function doImport(mode) {
   if (!pendingImport) return;
   let toUpload = pendingImport;
-
+ 
   if (mode === 'overwrite') {
     if (!confirm(`確定覆蓋目前 ${db.length} 筆？`)) return;
     // 先清空再上傳
@@ -615,13 +621,13 @@ async function doImport(mode) {
     const existIds = new Set(db.map(m=>m.id));
     toUpload = pendingImport.filter(m => !existIds.has(m.id));
   }
-
+ 
   let count = 0;
   for (const m of toUpload) {
     await apiFetch('/db', { method: 'POST', body: JSON.stringify(m) }).catch(()=>{});
     count++;
   }
-
+ 
   await loadDb();
   toast(`匯入完成，${mode === 'overwrite' ? '覆蓋' : '新增'} ${count} 筆`, 'ok');
   pendingImport = null;
@@ -629,7 +635,7 @@ async function doImport(mode) {
   document.getElementById('import-info').style.display = 'none';
   document.getElementById('file-inp').value = '';
 }
-
+ 
 async function clearAll() {
   if (!confirm(`確定清空全部 ${db.length} 筆？`)) return;
   for (const m of db) {
@@ -638,23 +644,26 @@ async function clearAll() {
   await loadDb();
   toast('資料庫已清空');
 }
-
+ 
 // ── UTILS ─────────────────────────────────────────────────────────
 function split(s) { return s.split(/[,，、\s]+/).map(x=>x.trim()).filter(Boolean); }
 function join(a) { return (a||[]).join('、'); }
 function esc(s) { return (s||'').replace(/'/g,"\\'"); }
-
+ 
 let tt;
 function toast(msg, type='') {
   const el = document.getElementById('toast');
   el.textContent = msg; el.className = 'show ' + type;
   clearTimeout(tt); tt = setTimeout(()=>el.className='', 2400);
 }
-
+ 
 // ── INIT ──────────────────────────────────────────────────────────
 checkServer();
 loadDb();
 setInterval(checkServer, 30000);
+ 
+// debug：在 console 印出 API 位址
+console.log('API endpoint:', API);
 </script>
 </body>
 </html>
