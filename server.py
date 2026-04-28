@@ -133,16 +133,18 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        path = self.path.split('?')[0]  # 去掉 query string
+
         # 健康檢查
-        if self.path == "/ping":
+        if path == "/ping":
             self.send_json(200, {"ok": True, "model": MODEL})
 
         # 讀取全部電影
-        elif self.path == "/db":
+        elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
 
-        # 提供前端 HTML
-        elif self.path == "/" or self.path == "/index.html":
+        # 提供前端 HTML（只有根路徑才給 HTML）
+        elif path == "/" or path == "/index.html":
             if os.path.exists("index.html"):
                 with open("index.html", 'r', encoding='utf-8') as f:
                     self.send_html(f.read())
@@ -153,21 +155,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        path = self.path.split('?')[0]
+
         # Gemini 分析影片
-        if self.path == "/analyze":
+        if path == "/analyze":
             self.handle_analyze()
 
-        # 新增電影
-        elif self.path == "/db":
+        # 新增電影／更新
+        elif path == "/db":
             self.handle_db_add()
+
+        # ping
+        elif path == "/ping":
+            self.send_json(200, {"ok": True})
 
         else:
             self.send_json(404, {"ok": False, "error": "路徑不存在"})
 
     def do_DELETE(self):
+        path = self.path.split('?')[0]
         # 刪除電影 /db/<id>
-        if self.path.startswith("/db/"):
-            movie_id = self.path[4:]
+        if path.startswith("/db/"):
+            movie_id = path[4:]
             data = db_read()
             new_data = [m for m in data if m.get('id') != movie_id]
             if len(new_data) == len(data):
