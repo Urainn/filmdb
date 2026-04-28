@@ -105,6 +105,7 @@ SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
 def sheets_request(method, path, body=None):
     token = get_access_token()
     url = f"{SHEETS_BASE}/{SPREADSHEET_ID}{path}"
+    print(f"  📡 Sheets {method} {url[:80]}")
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode() if body else None,
@@ -114,8 +115,14 @@ def sheets_request(method, path, body=None):
         },
         method=method
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            return result
+    except urllib.error.HTTPError as e:
+        err = e.read().decode('utf-8', errors='replace')
+        print(f"  ✗ Sheets HTTP {e.code} 錯誤：{err[:300]}")
+        raise Exception(f"Sheets API 錯誤 {e.code}：{err[:200]}")
 
 def ensure_sheet():
     """確保工作表存在，沒有就建立"""
@@ -132,7 +139,8 @@ def ensure_sheet():
 
 def db_read():
     try:
-        result = sheets_request("GET", f"/values/{SHEET_NAME}!A:A")
+        encoded = urllib.parse.quote(f"{SHEET_NAME}!A:A")
+        result = sheets_request("GET", f"/values/{encoded}")
         rows = result.get("values", [])
         records = []
         for row in rows:
@@ -149,7 +157,8 @@ def db_read():
 def db_find_row(movie_id):
     """找到某個 id 在第幾行（1-based）"""
     try:
-        result = sheets_request("GET", f"/values/{SHEET_NAME}!A:A")
+        encoded = urllib.parse.quote(f"{SHEET_NAME}!A:A")
+        result = sheets_request("GET", f"/values/{encoded}")
         rows = result.get("values", [])
         for i, row in enumerate(rows):
             if row:
@@ -164,12 +173,16 @@ def db_find_row(movie_id):
     return None
 
 def db_append(record):
-    sheets_request("POST", f"/values/{SHEET_NAME}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", {
+    encoded = urllib.parse.quote(f"{SHEET_NAME}!A:A")
+    result = sheets_request("POST", f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", {
         "values": [[json.dumps(record, ensure_ascii=False)]]
     })
+    print(f"  📝 Sheets append 回應：{result}")
+    return result
 
 def db_update_row(row_num, record):
-    sheets_request("PUT", f"/values/{SHEET_NAME}!A{row_num}?valueInputOption=RAW", {
+    encoded = urllib.parse.quote(f"{SHEET_NAME}!A{row_num}")
+    sheets_request("PUT", f"/values/{encoded}?valueInputOption=RAW", {
         "values": [[json.dumps(record, ensure_ascii=False)]]
     })
 
@@ -322,16 +335,18 @@ class Handler(BaseHTTPRequestHandler):
         if not body.get('id'):
             body['id'] = uid()
 
-        # 檢查是否已存在（更新）
-        row_num = db_find_row(body['id'])
-        if row_num:
-            db_update_row(row_num, body)
-            print(f"  ✏️  更新電影：{body.get('title')}")
-        else:
-            db_append(body)
-            print(f"  ✅ 新增電影：{body.get('title')}")
-
-        self.send_json(200, {"ok": True, "data": body})
+        try:
+            row_num = db_find_row(body['id'])
+            if row_num:
+                db_update_row(row_num, body)
+                print(f"  ✏️  更新電影：{body.get('title')}")
+            else:
+                result = db_append(body)
+                print(f"  ✅ 新增電影：{body.get('title')} | 回應：{str(result)[:100]}")
+            self.send_json(200, {"ok": True, "data": body})
+        except Exception as e:
+            print(f"  ✗ 寫入 Sheets 失敗：{e}")
+            self.send_json(200, {"ok": False, "error": f"寫入資料庫失敗：{str(e)}"})
 
     def handle_analyze(self):
         body = self.read_body()
