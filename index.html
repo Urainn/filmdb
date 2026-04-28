@@ -316,8 +316,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 <div id="toast"></div>
 
 <script>
-// ── 伺服器位址（部署後改成 Render 的網址）────────────────────────
-const API = window.location.origin;  // 自動對應當前網址
+// ── 伺服器位址 ───────────────────────────────────────────────────
+const API = window.location.origin;
 // ────────────────────────────────────────────────────────────────
 
 let db = [];
@@ -328,16 +328,20 @@ let serverOnline = false;
 
 // ── API 呼叫 ──────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
-  const res = await fetch(API + path, {
+  const url = API + path;
+  console.log(`[API] ${options.method||'GET'} ${url}`);
+  const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...options
   });
+  console.log(`[API] 回應狀態：${res.status} ${res.statusText}`);
   const text = await res.text();
+  console.log(`[API] 回應內容前100字：${text.slice(0,100)}`);
   try {
     return JSON.parse(text);
   } catch(e) {
-    console.error('API 回傳非 JSON：', text.slice(0, 200));
-    throw new Error('伺服器回傳格式錯誤：' + text.slice(0, 100));
+    console.error('[API] 回傳非 JSON：', text.slice(0, 300));
+    throw new Error('伺服器回傳格式錯誤：' + text.slice(0, 150));
   }
 }
 
