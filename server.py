@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """
-FilmDB 雲端伺服器
-- 處理 Gemini API 分析
-- 讀寫共用 JSON 資料庫
-- 所有人連同一個網址即可共用
+FilmDB 雲端伺服器 — Google Sheets 版
+資料永久儲存在 Google Sheets，重新部署不會消失
 """
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import urllib.request
 import urllib.error
+import urllib.parse
 import json
 import re
 import os
 import time
 import threading
+import base64
 
-# ── 設定（Render 上用環境變數，本地用預設值）────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "在這裡填入你的 Gemini Key")
-PORT = int(os.environ.get("PORT", 8765))
-DB_FILE = os.environ.get("DB_FILE", "film-db.json")
-# ────────────────────────────────────────────────────────────────
+# ── 環境變數設定 ──────────────────────────────────────────────────
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+SHEETS_CREDS    = os.environ.get("SHEETS_CREDS", "")   # JSON 字串
+SPREADSHEET_ID  = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
+SHEET_NAME      = os.environ.get("SHEET_NAME", "films")
+PORT            = int(os.environ.get("PORT", 8765))
+# ─────────────────────────────────────────────────────────────────
 
 MODEL = "gemini-2.5-flash"
 
@@ -38,24 +40,164 @@ PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物�
 
 重要：就算不確定也要根據影片畫面猜測填入，scenes_main、scenes_sub、genres、moods 每個都至少要有 2 個值。"""
 
-# 資料庫讀寫鎖（防止多人同時寫入衝突）
-db_lock = threading.Lock()
+# ── Google Sheets OAuth ───────────────────────────────────────────
+_token_cache = {"token": None, "expires": 0}
+_token_lock = threading.Lock()
 
-# ── 資料庫操作 ────────────────────────────────────────────────────
-def db_read():
-    with db_lock:
-        if not os.path.exists(DB_FILE):
-            return []
+def get_access_token():
+    with _token_lock:
+        if _token_cache["token"] and time.time() < _token_cache["expires"] - 60:
+            return _token_cache["token"]
+
+        creds = json.loads(SHEETS_CREDS)
+        now = int(time.time())
+
+        # 建立 JWT
+        header = base64.urlsafe_b64encode(json.dumps({"alg":"RS256","typ":"JWT"}).encode()).rstrip(b'=').decode()
+        payload = base64.urlsafe_b64encode(json.dumps({
+            "iss": creds["client_email"],
+            "scope": "https://www.googleapis.com/auth/spreadsheets",
+            "aud": "https://oauth2.googleapis.com/token",
+            "exp": now + 3600,
+            "iat": now
+        }).encode()).rstrip(b'=').decode()
+
+        # 用 RSA 簽名
+        import hashlib, hmac
         try:
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return []
+            from cryptography.hazmat.primitives import serialization, hashes
+            from cryptography.hazmat.primitives.asymmetric import padding
+            from cryptography.hazmat.backends import default_backend
 
-def db_write(data):
-    with db_lock:
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            private_key = serialization.load_pem_private_key(
+                creds["private_key"].encode(),
+                password=None,
+                backend=default_backend()
+            )
+            signing_input = f"{header}.{payload}".encode()
+            signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+            sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b'=').decode()
+        except ImportError:
+            raise Exception("需要安裝 cryptography 套件")
+
+        jwt_token = f"{header}.{payload}.{sig_b64}"
+
+        # 換取 access token
+        req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token",
+            data=urllib.parse.urlencode({
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": jwt_token
+            }).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            token_data = json.loads(resp.read())
+
+        _token_cache["token"] = token_data["access_token"]
+        _token_cache["expires"] = now + token_data.get("expires_in", 3600)
+        return _token_cache["token"]
+
+# ── Google Sheets 操作 ────────────────────────────────────────────
+SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
+
+def sheets_request(method, path, body=None):
+    token = get_access_token()
+    url = f"{SHEETS_BASE}/{SPREADSHEET_ID}{path}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode() if body else None,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        },
+        method=method
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+def ensure_sheet():
+    """確保工作表存在，沒有就建立"""
+    try:
+        info = sheets_request("GET", "")
+        sheets = [s["properties"]["title"] for s in info.get("sheets", [])]
+        if SHEET_NAME not in sheets:
+            sheets_request("POST", ":batchUpdate", {
+                "requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]
+            })
+            print(f"  ✓ 建立工作表：{SHEET_NAME}")
+    except Exception as e:
+        print(f"  ⚠ ensure_sheet 錯誤：{e}")
+
+def db_read():
+    try:
+        result = sheets_request("GET", f"/values/{SHEET_NAME}!A:A")
+        rows = result.get("values", [])
+        records = []
+        for row in rows:
+            if row:
+                try:
+                    records.append(json.loads(row[0]))
+                except Exception:
+                    pass
+        return records
+    except Exception as e:
+        print(f"  ✗ db_read 錯誤：{e}")
+        return []
+
+def db_find_row(movie_id):
+    """找到某個 id 在第幾行（1-based）"""
+    try:
+        result = sheets_request("GET", f"/values/{SHEET_NAME}!A:A")
+        rows = result.get("values", [])
+        for i, row in enumerate(rows):
+            if row:
+                try:
+                    record = json.loads(row[0])
+                    if record.get("id") == movie_id:
+                        return i + 1  # 1-based
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"  ✗ db_find_row 錯誤：{e}")
+    return None
+
+def db_append(record):
+    sheets_request("POST", f"/values/{SHEET_NAME}!A:A:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS", {
+        "values": [[json.dumps(record, ensure_ascii=False)]]
+    })
+
+def db_update_row(row_num, record):
+    sheets_request("PUT", f"/values/{SHEET_NAME}!A{row_num}?valueInputOption=RAW", {
+        "values": [[json.dumps(record, ensure_ascii=False)]]
+    })
+
+def db_delete_row(row_num):
+    sheets_request("POST", ":batchUpdate", {
+        "requests": [{
+            "deleteDimension": {
+                "range": {
+                    "sheetId": get_sheet_id(),
+                    "dimension": "ROWS",
+                    "startIndex": row_num - 1,
+                    "endIndex": row_num
+                }
+            }
+        }]
+    })
+
+_sheet_id_cache = None
+def get_sheet_id():
+    global _sheet_id_cache
+    if _sheet_id_cache is not None:
+        return _sheet_id_cache
+    info = sheets_request("GET", "")
+    for s in info.get("sheets", []):
+        if s["properties"]["title"] == SHEET_NAME:
+            _sheet_id_cache = s["properties"]["sheetId"]
+            return _sheet_id_cache
+    return 0
 
 def uid():
     import random, string
@@ -133,57 +275,41 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
-        path = self.path.split('?')[0]  # 去掉 query string
-
-        # 健康檢查
+        path = self.path.split('?')[0]
         if path == "/ping":
             self.send_json(200, {"ok": True, "model": MODEL})
-
-        # 讀取全部電影
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
-
-        # 提供前端 HTML（只有根路徑才給 HTML）
         elif path == "/" or path == "/index.html":
             if os.path.exists("index.html"):
                 with open("index.html", 'r', encoding='utf-8') as f:
                     self.send_html(f.read())
             else:
                 self.send_json(404, {"error": "index.html 不存在"})
-
         else:
             self.send_json(404, {"error": "not found"})
 
     def do_POST(self):
         path = self.path.split('?')[0]
-
-        # Gemini 分析影片
         if path == "/analyze":
             self.handle_analyze()
-
-        # 新增電影／更新
         elif path == "/db":
             self.handle_db_add()
-
-        # ping
         elif path == "/ping":
             self.send_json(200, {"ok": True})
-
         else:
             self.send_json(404, {"ok": False, "error": "路徑不存在"})
 
     def do_DELETE(self):
         path = self.path.split('?')[0]
-        # 刪除電影 /db/<id>
         if path.startswith("/db/"):
             movie_id = path[4:]
-            data = db_read()
-            new_data = [m for m in data if m.get('id') != movie_id]
-            if len(new_data) == len(data):
+            row_num = db_find_row(movie_id)
+            if row_num is None:
                 self.send_json(404, {"ok": False, "error": "找不到此 ID"})
             else:
-                db_write(new_data)
-                print(f"  🗑 刪除電影：{movie_id}")
+                db_delete_row(row_num)
+                print(f"  🗑 刪除電影 ID：{movie_id}")
                 self.send_json(200, {"ok": True})
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
@@ -195,16 +321,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not body.get('id'):
             body['id'] = uid()
-        data = db_read()
-        # 如果是更新（id 已存在）
-        existing = next((i for i, m in enumerate(data) if m.get('id') == body['id']), None)
-        if existing is not None:
-            data[existing] = body
+
+        # 檢查是否已存在（更新）
+        row_num = db_find_row(body['id'])
+        if row_num:
+            db_update_row(row_num, body)
             print(f"  ✏️  更新電影：{body.get('title')}")
         else:
-            data.append(body)
+            db_append(body)
             print(f"  ✅ 新增電影：{body.get('title')}")
-        db_write(data)
+
         self.send_json(200, {"ok": True, "data": body})
 
     def handle_analyze(self):
@@ -278,14 +404,24 @@ class ThreadedServer(ThreadingMixIn, HTTPServer):
 def main():
     print()
     print("=" * 52)
-    print("  FilmDB 雲端伺服器")
+    print("  FilmDB 雲端伺服器（Google Sheets 版）")
     print("=" * 52)
     print(f"  PORT  : {PORT}")
-    print(f"  DB    : {DB_FILE}")
-    print(f"  Key   : {GEMINI_API_KEY[:12]}...")
+    print(f"  SHEET : {SPREADSHEET_ID}")
     print(f"  Model : {MODEL}")
     print("=" * 52)
+
+    if not SHEETS_CREDS:
+        print("  ✗ 缺少 SHEETS_CREDS 環境變數！")
+        return
+    if not GEMINI_API_KEY:
+        print("  ✗ 缺少 GEMINI_API_KEY 環境變數！")
+        return
+
+    ensure_sheet()
+    print("  ✓ Google Sheets 連線成功")
     print()
+
     server = ThreadedServer(("0.0.0.0", PORT), Handler)
     try:
         server.serve_forever()
