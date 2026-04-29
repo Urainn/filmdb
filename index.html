@@ -473,38 +473,81 @@ function onUrl() {
   document.getElementById('btn-analyze').disabled = !curYtId;
 }
 
+const ANALYZE_MSGS = [
+  'Gemini 正在分析影片內容（約 15-40 秒）...',
+  '正在辨識場景與類型，請稍候...',
+  '即將完成，請耐心等待...',
+  '伺服器忙碌中，持續重試，請勿關閉...',
+];
+
 async function analyze() {
   document.getElementById('btn-analyze').disabled = true;
   document.getElementById('s1').className = 'step s-done';
   document.getElementById('s2').style.display = 'block';
 
-  try {
-    const ytUrl = document.getElementById('f-url').value.trim();
-    const r = await apiFetch('/analyze', {
-      method: 'POST',
-      body: JSON.stringify({ url: ytUrl })
-    });
-    if (!r.ok) throw new Error(r.error || '分析失敗');
+  // 輪播等待訊息，避免使用者以為當機
+  let msgIdx = 0;
+  const msgEl = document.getElementById('analyze-msg');
+  const msgTimer = setInterval(() => {
+    msgIdx = (msgIdx + 1) % ANALYZE_MSGS.length;
+    msgEl.textContent = ANALYZE_MSGS[msgIdx];
+  }, 8000);
 
-    const p = r.data;
-    document.getElementById('f-title').value = p.title || '';
-    document.getElementById('f-desc').value = p.desc || '';
-    document.getElementById('f-scenes-main').value = join(p.scenes_main);
-    document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
-    document.getElementById('f-genres').value = join(p.genres);
-    document.getElementById('f-moods').value = join(p.moods);
+  const ytUrl = document.getElementById('f-url').value.trim();
+  let r = null;
+  let attempts = 0;
+  const maxAttempts = 5;
 
-    document.getElementById('s2').style.display = 'none';
-    document.getElementById('s3').style.display = 'block';
-    document.getElementById('s3').className = 'step s-active';
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      r = await apiFetch('/analyze', {
+        method: 'POST',
+        body: JSON.stringify({ url: ytUrl })
+      });
+      if (r.ok) break; // 成功就跳出
 
-  } catch(e) {
+      // 如果是 503 或其他可重試的錯誤，繼續等待重試
+      if (r.error && r.error.includes('503')) {
+        msgEl.textContent = `伺服器忙碌，第 ${attempts} 次重試中，請稍候...`;
+        await new Promise(res => setTimeout(res, 6000));
+        continue;
+      }
+      // 其他錯誤直接跳出
+      break;
+    } catch(e) {
+      if (attempts < maxAttempts) {
+        msgEl.textContent = `連線中斷，重試中（${attempts}/${maxAttempts}）...`;
+        await new Promise(res => setTimeout(res, 4000));
+      } else {
+        r = { ok: false, error: e.message };
+      }
+    }
+  }
+
+  clearInterval(msgTimer);
+
+  if (!r || !r.ok) {
+    // 完全失敗才顯示錯誤
     const st = document.getElementById('analyze-status');
     st.className = 'sbox show err';
-    st.textContent = '✗ ' + e.message;
+    st.innerHTML = '✗ 分析失敗，請重新試一次';
     document.getElementById('btn-analyze').disabled = false;
     document.getElementById('s1').className = 'step s-active';
+    return;
   }
+
+  const p = r.data;
+  document.getElementById('f-title').value = p.title || '';
+  document.getElementById('f-desc').value = p.desc || '';
+  document.getElementById('f-scenes-main').value = join(p.scenes_main);
+  document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
+  document.getElementById('f-genres').value = join(p.genres);
+  document.getElementById('f-moods').value = join(p.moods);
+
+  document.getElementById('s2').style.display = 'none';
+  document.getElementById('s3').style.display = 'block';
+  document.getElementById('s3').className = 'step s-active';
 }
 
 async function saveEntry() {
