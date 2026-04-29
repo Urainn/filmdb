@@ -18,12 +18,17 @@ import base64
 import sys
 
 # ── 環境變數設定 ──────────────────────────────────────────────────
-GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
-SHEETS_CREDS    = os.environ.get("SHEETS_CREDS", "")   # JSON 字串
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")  # 初始 Key（可在網頁設定覆蓋）
+SHEETS_CREDS    = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID  = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
 SHEET_NAME      = os.environ.get("SHEET_NAME", "films")
+CONFIG_SHEET    = "config"   # 設定存在這個工作表
 PORT            = int(os.environ.get("PORT", 8765))
 # ─────────────────────────────────────────────────────────────────
+
+# 執行時的 Key 列表（從 Sheets config 讀取，優先於環境變數）
+_gemini_keys = []
+_key_lock = threading.Lock()
 
 MODEL = "gemini-2.5-flash"
 
@@ -103,6 +108,63 @@ def get_access_token():
         _token_cache["expires"] = now + token_data.get("expires_in", 3600)
         return _token_cache["token"]
 
+# ── Config 管理 ──────────────────────────────────────────────────
+def get_gemini_keys():
+    """從 Sheets config 取得 Key 列表，若無則用環境變數"""
+    global _gemini_keys
+    with _key_lock:
+        try:
+            encoded = urllib.parse.quote(f"{CONFIG_SHEET}!A:B")
+            result = sheets_request("GET", f"/values/{encoded}")
+            rows = result.get("values", [])
+            keys = []
+            for row in rows:
+                if len(row) >= 2 and row[0] == "gemini_key" and row[1].strip():
+                    keys.append(row[1].strip())
+            if keys:
+                _gemini_keys = keys
+                return keys
+        except Exception as e:
+            print(f"  ⚠ 讀取 config 失敗：{e}")
+        # fallback 到環境變數
+        if GEMINI_API_KEY:
+            return [GEMINI_API_KEY]
+        return []
+
+def save_gemini_keys(keys):
+    """把 Key 列表存到 Sheets config"""
+    try:
+        ensure_config_sheet()
+        # 先清空舊的 gemini_key 行
+        all_rows = sheets_request("GET", f"/values/{urllib.parse.quote(CONFIG_SHEET+'!A:B')}").get("values", [])
+        # 找出非 gemini_key 的行
+        other_rows = [r for r in all_rows if not (r and r[0] == "gemini_key")]
+        # 加入新的 Keys
+        new_rows = other_rows + [["gemini_key", k] for k in keys if k.strip()]
+        # 清空再寫入
+        sheets_request("DELETE", f"/values/{urllib.parse.quote(CONFIG_SHEET+'!A:B')}:clear")
+        if new_rows:
+            sheets_request("PUT", f"/values/{urllib.parse.quote(CONFIG_SHEET+'!A1')}?valueInputOption=RAW", {"values": new_rows})
+        global _gemini_keys
+        with _key_lock:
+            _gemini_keys = [k for k in keys if k.strip()]
+        print(f"  ✓ 已儲存 {len(_gemini_keys)} 組 Gemini Key")
+        return True
+    except Exception as e:
+        print(f"  ✗ 儲存 Key 失敗：{e}")
+        return False
+
+def ensure_config_sheet():
+    try:
+        info = sheets_request("GET", "")
+        sheets = [s["properties"]["title"] for s in info.get("sheets", [])]
+        if CONFIG_SHEET not in sheets:
+            sheets_request("POST", ":batchUpdate", {
+                "requests": [{"addSheet": {"properties": {"title": CONFIG_SHEET}}}]
+            })
+    except Exception:
+        pass
+
 # ── Google Sheets 操作 ────────────────────────────────────────────
 SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
 
@@ -133,11 +195,12 @@ def ensure_sheet():
     try:
         info = sheets_request("GET", "")
         sheets = [s["properties"]["title"] for s in info.get("sheets", [])]
-        if SHEET_NAME not in sheets:
-            sheets_request("POST", ":batchUpdate", {
-                "requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]
-            })
-            print(f"  ✓ 建立工作表：{SHEET_NAME}")
+        for name in [SHEET_NAME, CONFIG_SHEET]:
+            if name not in sheets:
+                sheets_request("POST", ":batchUpdate", {
+                    "requests": [{"addSheet": {"properties": {"title": name}}}]
+                })
+                print(f"  ✓ 建立工作表：{name}")
     except Exception as e:
         print(f"  ⚠ ensure_sheet 錯誤：{e}")
 
@@ -297,6 +360,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True, "model": MODEL})
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
+        elif path == "/config/keys":
+            keys = get_gemini_keys()
+            # 回傳遮罩後的 Key（只顯示前8碼）
+            masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4]+"..." for k in keys]
+            self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
+
         elif path == "/" or path == "/index.html":
             if os.path.exists("index.html"):
                 with open("index.html", 'r', encoding='utf-8') as f:
@@ -313,6 +382,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_analyze()
         elif path == "/db":
             self.handle_db_add()
+        elif path == "/config/keys":
+            self.handle_save_keys()
         elif path == "/ping":
             self.send_json(200, {"ok": True})
         else:
@@ -332,6 +403,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, {"ok": True})
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
+
+    def handle_save_keys(self):
+        body = self.read_body()
+        keys = body.get("keys", [])
+        if not isinstance(keys, list) or not keys:
+            self.send_json(400, {"ok": False, "error": "請提供 keys 陣列"})
+            return
+        # 過濾空白
+        keys = [k.strip() for k in keys if k.strip()]
+        ok = save_gemini_keys(keys)
+        if ok:
+            self.send_json(200, {"ok": True, "count": len(keys)})
+        else:
+            self.send_json(200, {"ok": False, "error": "儲存失敗"})
 
     def handle_db_add(self):
         import sys
@@ -446,7 +531,10 @@ def main():
         return
 
     ensure_sheet()
-    print("  ✓ Google Sheets 連線成功")
+    ensure_config_sheet()
+    keys = get_gemini_keys()
+    print(f"  ✓ Google Sheets 連線成功")
+    print(f"  ✓ Gemini Keys：{len(keys)} 組")
     print()
 
     print(f"  正在啟動伺服器於 0.0.0.0:{PORT}...")
