@@ -398,9 +398,11 @@ async function loadDb() {
       db = r.data;
       updateStats();
       renderList();
+      setServerStatus(true);  // 載入成功 = 連線正常
     }
   } catch(e) {
     console.error('載入失敗', e);
+    setServerStatus(false);
   }
 }
 
@@ -418,23 +420,23 @@ function updateStats() {
 
 // ── 伺服器狀態 ────────────────────────────────────────────────────
 async function checkServer() {
-  try {
-    // 用 /db 來確認伺服器狀態（因為 /ping 可能被 Render 攔截）
-    const r = await fetch(API + '/db', { signal: AbortSignal.timeout(8000) });
-    serverOnline = r.ok;
-  } catch(e) {
-    serverOnline = false;
-  }
+  // 直接根據 loadDb 是否成功來判斷連線狀態
+  // 不另外發請求，避免 Render proxy 攔截
+  setServerStatus(serverOnline);
+}
+
+function setServerStatus(online) {
+  serverOnline = online;
   const dot = document.getElementById('srv-dot');
   const txt = document.getElementById('srv-text');
-  if (serverOnline) {
+  if (online) {
     dot.className = 'dot ok';
     txt.textContent = '雲端連線中';
     txt.style.color = 'var(--accent)';
   } else {
-    dot.className = 'dot err';
-    txt.textContent = '無法連線';
-    txt.style.color = 'var(--red)';
+    dot.className = 'dot checking';
+    txt.textContent = '連線中...';
+    txt.style.color = 'var(--text3)';
   }
 }
 
@@ -875,9 +877,8 @@ async function saveKeys() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────
-checkServer();
-loadDb();
-setInterval(checkServer, 30000);
+loadDb();  // 載入資料庫，成功後自動更新連線狀態
+setInterval(loadDb, 60000);  // 每 60 秒自動重新整理
 
 // debug：在 console 印出 API 位址
 console.log('API endpoint:', API);
