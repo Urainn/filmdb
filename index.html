@@ -419,9 +419,9 @@ function updateStats() {
 // ── 伺服器狀態 ────────────────────────────────────────────────────
 async function checkServer() {
   try {
-    const r = await fetch(API + '/ping', { signal: AbortSignal.timeout(4000) });
-    const d = await r.json();
-    serverOnline = d.ok === true;
+    // 用 /db 來確認伺服器狀態（因為 /ping 可能被 Render 攔截）
+    const r = await fetch(API + '/db', { signal: AbortSignal.timeout(8000) });
+    serverOnline = r.ok;
   } catch(e) {
     serverOnline = false;
   }
