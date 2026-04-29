@@ -854,8 +854,7 @@ async function loadKeyStatus() {
 
 async function saveKeys() {
   const raw = document.getElementById('keys-input').value.trim();
-  const keys = raw.split('
-').map(k => k.trim()).filter(k => k.startsWith('AIza'));
+  const keys = raw.split('\n').map(k => k.trim()).filter(k => k.startsWith('AIza'));
   const st = document.getElementById('keys-save-status');
 
   if (keys.length === 0) {
