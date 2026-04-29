@@ -393,15 +393,25 @@ async function apiFetch(path, options = {}) {
 // ── 載入資料庫 ────────────────────────────────────────────────────
 async function loadDb() {
   try {
-    const r = await apiFetch('/db');
+    console.log('[loadDb] 開始載入，API =', API);
+    const res = await fetch(API + '/db', {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    console.log('[loadDb] HTTP 狀態：', res.status, res.headers.get('content-type'));
+    const text = await res.text();
+    console.log('[loadDb] 回應前200字：', text.slice(0, 200));
+    const r = JSON.parse(text);
     if (r.ok) {
       db = r.data;
       updateStats();
       renderList();
-      setServerStatus(true);  // 載入成功 = 連線正常
+      setServerStatus(true);
+    } else {
+      console.error('[loadDb] 回應 ok=false：', r);
+      setServerStatus(false);
     }
   } catch(e) {
-    console.error('載入失敗', e);
+    console.error('[loadDb] 失敗：', e.message);
     setServerStatus(false);
   }
 }
