@@ -142,7 +142,7 @@ def save_gemini_keys(keys):
         # 加入新的 Keys
         new_rows = other_rows + [["gemini_key", k] for k in keys if k.strip()]
         # 清空再寫入
-        sheets_request("DELETE", f"/values/{urllib.parse.quote(CONFIG_SHEET+'!A:B')}:clear")
+        sheets_request("POST", f"/values/{urllib.parse.quote(CONFIG_SHEET+chr(33)+'A:Z')}:clear", {})
         if new_rows:
             sheets_request("PUT", f"/values/{urllib.parse.quote(CONFIG_SHEET+'!A1')}?valueInputOption=RAW", {"values": new_rows})
         global _gemini_keys
