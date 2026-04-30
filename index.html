@@ -202,7 +202,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <table>
         <thead><tr>
           <th style="width:66px">縮圖</th><th>電影名稱</th>
-          <th>YT 網址</th><th>主要場景</th><th>次要場景</th><th>類型／情感</th><th style="width:96px">操作</th>
+          <th>主要場景</th><th>次要場景</th><th>類型／情感</th><th style="width:96px">操作</th>
         </tr></thead>
         <tbody id="list-body"></tbody>
       </table>
@@ -479,19 +479,24 @@ function renderList() {
 
   body.innerHTML = rows.map(m => `
     <tr>
-      <td><img class="thumb" src="https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg"
-        onclick="playVideo('${m.ytId}','${esc(m.title)}')" title="點擊預覽"
-        onerror="this.style.background='#222'"></td>
+      <td>
+        <img class="thumb" src="https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg"
+          onclick="playVideo('${m.ytId}','${esc(m.title)}')"
+          title="▶ 點擊播放"
+          style="cursor:pointer;transition:opacity 0.15s"
+          onmouseover="this.style.opacity=0.75"
+          onmouseout="this.style.opacity=1"
+          onerror="this.style.background='#222'">
+      </td>
       <td>
         <div class="td-title">${m.title}</div>
-        <div style="font-size:10.5px;color:var(--text3);margin-top:1px">${m.desc ? m.desc.slice(0,36)+(m.desc.length>36?'…':'') : ''}</div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:1px">${m.desc ? m.desc.slice(0,40)+(m.desc.length>40?'…':'') : ''}</div>
       </td>
-      <td><span class="td-mono" style="color:var(--blue);font-size:10px;word-break:break-all">${m.url||('https://www.youtube.com/watch?v='+m.ytId)}</span></td>
       <td><div class="chips">${(m.scenesMain||[]).map(t=>`<span class="chip sc">${t}</span>`).join('')}</div></td>
       <td><div class="chips">${(m.scenesSub||[]).map(t=>`<span class="chip sc" style="opacity:0.7">${t}</span>`).join('')}</div></td>
       <td><div class="chips">
-        ${(m.genres||[]).slice(0,2).map(t=>`<span class="chip gn">${t}</span>`).join('')}
-        ${(m.moods||[]).slice(0,2).map(t=>`<span class="chip md">${t}</span>`).join('')}
+        ${(m.genres||[]).map(t=>`<span class="chip gn">${t}</span>`).join('')}
+        ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
       </div></td>
       <td><div class="td-acts">
         <button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
