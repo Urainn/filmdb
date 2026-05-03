@@ -143,6 +143,30 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 #toast.ok { border-color: rgba(212,242,122,0.3); color: var(--accent); }
 #toast.err { border-color: rgba(242,122,122,0.3); color: var(--red); }
 
+.yt-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden; cursor: pointer;
+  transition: border-color 0.15s; position: relative; user-select: none;
+}
+.yt-card:hover { border-color: var(--border2); }
+.yt-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+.yt-card.in-db { opacity: 0.5; }
+.yt-card.in-db::after {
+  content: '已在庫中'; position: absolute; top: 6px; right: 6px;
+  background: rgba(0,0,0,0.7); color: var(--accent); font-size: 9px;
+  font-family: 'DM Mono', monospace; padding: 2px 6px; border-radius: 4px;
+}
+.yt-thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+.yt-info { padding: 8px 10px; }
+.yt-title { font-size: 11.5px; font-weight: 500; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.yt-meta { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; }
+.yt-check {
+  position: absolute; top: 6px; left: 6px; width: 18px; height: 18px;
+  border-radius: 50%; background: rgba(0,0,0,0.6); border: 1.5px solid rgba(255,255,255,0.4);
+  display: flex; align-items: center; justify-content: center; font-size: 10px; color: white;
+}
+.yt-card.selected .yt-check { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+
 .spin { display: inline-block; width: 11px; height: 11px; border: 1.5px solid rgba(255,255,255,0.15); border-top-color: var(--amber); border-radius: 50%; animation: rot 0.65s linear infinite; vertical-align: middle; margin-right: 5px; }
 @keyframes rot { to{transform:rotate(360deg)} }
 
@@ -168,6 +192,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
     <div class="nav-item" onclick="go('add',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="7"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/></svg>新增電影
+    </div>
+    <div class="nav-item" onclick="go('search-yt',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg>批次搜尋匯入
     </div>
     <div class="nav-label" style="margin-top:6px">工具</div>
     <div class="nav-item" onclick="go('io',this)">
@@ -297,6 +324,53 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <button class="btn btn-danger" onclick="clearAll()">清空雲端資料庫</button>
       </div>
     </div>
+  </div>
+
+  <!-- YOUTUBE SEARCH -->
+  <div id="panel-search-yt" class="panel">
+    <div class="page-head">
+      <div><div class="page-title">批次搜尋匯入</div><div class="page-sub">搜尋 YouTube 預告片，勾選後一鍵批次分析存入資料庫</div></div>
+    </div>
+
+    <!-- 搜尋列 -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;max-width:640px">
+      <input class="search-inp" id="yt-search-q" type="text"
+        placeholder="例如：2024 台灣電影預告片、horror movie trailer 2025..."
+        onkeydown="if(event.key==='Enter')ytSearch()">
+      <select id="yt-search-count" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none">
+        <option value="12">12 筆</option>
+        <option value="18">18 筆</option>
+        <option value="24">24 筆</option>
+      </select>
+      <button class="btn btn-accent" onclick="ytSearch()" id="btn-yt-search">🔍 搜尋</button>
+    </div>
+
+    <!-- 搜尋狀態 -->
+    <div class="sbox" id="yt-search-status" style="margin-bottom:16px;max-width:640px"></div>
+
+    <!-- 批次操作列 -->
+    <div id="yt-batch-bar" style="display:none;margin-bottom:12px;display:none;align-items:center;gap:10px;flex-wrap:wrap">
+      <span id="yt-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace"></span>
+      <button class="btn btn-sm" onclick="ytSelectAll()">全選</button>
+      <button class="btn btn-sm" onclick="ytSelectNone()">取消全選</button>
+      <button class="btn btn-accent" id="btn-batch-analyze" onclick="ytBatchAnalyze()" disabled>
+        ✦ 批次分析並存入資料庫
+      </button>
+    </div>
+
+    <!-- 批次進度 -->
+    <div id="yt-batch-progress" style="display:none;margin-bottom:16px;max-width:640px">
+      <div class="sbox show loading" id="yt-batch-status">
+        <span class="spin"></span><span id="yt-batch-msg">準備中...</span>
+      </div>
+      <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:4px;overflow:hidden;margin-top:8px">
+        <div id="yt-batch-bar-fill" style="height:100%;background:var(--accent);border-radius:99px;width:0%;transition:width 0.5s ease"></div>
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace" id="yt-batch-detail"></div>
+    </div>
+
+    <!-- 搜尋結果 -->
+    <div id="yt-results-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;max-width:900px"></div>
   </div>
 
   <!-- SETTINGS -->
@@ -457,7 +531,7 @@ function go(name, el) {
   document.getElementById('panel-'+name).classList.add('active');
   if (el) el.classList.add('active');
   else {
-    const map = {list:0, add:1, io:2, settings:3};
+    const map = {list:0, add:1, 'search-yt':2, io:3, settings:4};
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
@@ -834,6 +908,150 @@ function toast(msg, type='') {
   const el = document.getElementById('toast');
   el.textContent = msg; el.className = 'show ' + type;
   clearTimeout(tt); tt = setTimeout(()=>el.className='', 2400);
+}
+
+// ── YOUTUBE SEARCH ───────────────────────────────────────────────
+let ytResults = [];
+let ytSelected = new Set();
+
+async function ytSearch() {
+  const q = document.getElementById('yt-search-q').value.trim();
+  if (!q) { toast('請輸入搜尋關鍵字', 'err'); return; }
+  const maxResults = document.getElementById('yt-search-count').value;
+
+  const st = document.getElementById('yt-search-status');
+  st.className = 'sbox show loading';
+  st.innerHTML = '<span class="spin"></span> 搜尋中...';
+  document.getElementById('btn-yt-search').disabled = true;
+  document.getElementById('yt-results-grid').innerHTML = '';
+  document.getElementById('yt-batch-bar').style.display = 'none';
+  ytSelected.clear();
+
+  try {
+    const r = await apiFetch('/youtube/search', {
+      method: 'POST',
+      body: JSON.stringify({ query: q, max_results: parseInt(maxResults) })
+    });
+    if (!r.ok) throw new Error(r.error);
+    ytResults = r.data;
+    renderYtResults();
+    st.className = 'sbox show ok';
+    st.textContent = `✓ 找到 ${ytResults.length} 筆結果，點擊卡片選取`;
+  } catch(e) {
+    st.className = 'sbox show err';
+    st.textContent = '✗ 搜尋失敗：' + e.message;
+  }
+  document.getElementById('btn-yt-search').disabled = false;
+}
+
+function renderYtResults() {
+  const grid = document.getElementById('yt-results-grid');
+  if (!ytResults.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:12px">沒有搜尋結果</div>'; return; }
+
+  grid.innerHTML = ytResults.map((v, i) => `
+    <div class="yt-card ${v.inDb ? 'in-db' : ''} ${ytSelected.has(v.ytId) ? 'selected' : ''}"
+      onclick="ytToggle('${v.ytId}', ${v.inDb})" id="ytcard-${v.ytId}">
+      <div class="yt-check">${ytSelected.has(v.ytId) ? '✓' : ''}</div>
+      <img class="yt-thumb" src="${v.thumb}" alt="${v.title}" onerror="this.style.background='#222'">
+      <div class="yt-info">
+        <div class="yt-title">${v.title}</div>
+        <div class="yt-meta">${v.channel} · ${v.publishedAt}</div>
+      </div>
+    </div>
+  `).join('');
+
+  updateYtBatchBar();
+}
+
+function ytToggle(ytId, inDb) {
+  if (inDb) return; // 已在資料庫的不允許選取
+  if (ytSelected.has(ytId)) {
+    ytSelected.delete(ytId);
+  } else {
+    ytSelected.add(ytId);
+  }
+  const card = document.getElementById('ytcard-' + ytId);
+  if (card) {
+    card.classList.toggle('selected', ytSelected.has(ytId));
+    card.querySelector('.yt-check').textContent = ytSelected.has(ytId) ? '✓' : '';
+  }
+  updateYtBatchBar();
+}
+
+function ytSelectAll() {
+  ytResults.filter(v => !v.inDb).forEach(v => ytSelected.add(v.ytId));
+  renderYtResults();
+}
+
+function ytSelectNone() {
+  ytSelected.clear();
+  renderYtResults();
+}
+
+function updateYtBatchBar() {
+  const bar = document.getElementById('yt-batch-bar');
+  const cnt = document.getElementById('yt-selected-count');
+  const btn = document.getElementById('btn-batch-analyze');
+  const n = ytSelected.size;
+  bar.style.display = n > 0 || ytResults.length > 0 ? 'flex' : 'none';
+  cnt.textContent = `已選 ${n} 部影片`;
+  btn.disabled = n === 0;
+}
+
+async function ytBatchAnalyze() {
+  const selected = ytResults.filter(v => ytSelected.has(v.ytId));
+  if (!selected.length) return;
+
+  const confirmed = confirm(`確定要批次分析 ${selected.length} 部影片？
+每部約需 30-60 秒，總計約 ${Math.ceil(selected.length * 45 / 60)} 分鐘。`);
+  if (!confirmed) return;
+
+  document.getElementById('btn-batch-analyze').disabled = true;
+  document.getElementById('yt-batch-progress').style.display = 'block';
+
+  const msgEl = document.getElementById('yt-batch-msg');
+  const detailEl = document.getElementById('yt-batch-detail');
+  const barFill = document.getElementById('yt-batch-bar-fill');
+  const statusEl = document.getElementById('yt-batch-status');
+
+  const urls = selected.map(v => ({ url: v.url, ytId: v.ytId, title: v.title }));
+  let completed = 0;
+
+  // 因為批次分析時間長，改用逐一分析並即時更新進度
+  for (const item of urls) {
+    msgEl.textContent = `分析中：${item.title.slice(0, 30)}... (${completed + 1}/${urls.length})`;
+    detailEl.textContent = `已完成 ${completed}／${urls.length}，剩餘約 ${Math.ceil((urls.length - completed) * 45 / 60)} 分鐘`;
+    barFill.style.width = (completed / urls.length * 100) + '%';
+
+    try {
+      const r = await apiFetch('/youtube/batch-analyze', {
+        method: 'POST',
+        body: JSON.stringify({ urls: [item] })
+      });
+      if (r.ok) {
+        const res = r.results[0];
+        if (res.ok) {
+          // 標記為已在庫中
+          const v = ytResults.find(v => v.ytId === item.ytId);
+          if (v) v.inDb = true;
+          ytSelected.delete(item.ytId);
+          const card = document.getElementById('ytcard-' + item.ytId);
+          if (card) { card.classList.add('in-db'); card.classList.remove('selected'); }
+        }
+      }
+    } catch(e) {
+      console.error('分析失敗：', item.title, e);
+    }
+    completed++;
+  }
+
+  barFill.style.width = '100%';
+  statusEl.className = 'sbox show ok';
+  msgEl.textContent = `✓ 批次分析完成！成功加入 ${completed} 部電影`;
+  detailEl.textContent = '';
+  document.getElementById('btn-batch-analyze').disabled = false;
+  updateYtBatchBar();
+  await loadDb(); // 重新載入資料庫
 }
 
 // ── SETTINGS ─────────────────────────────────────────────────────
