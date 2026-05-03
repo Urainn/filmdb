@@ -24,7 +24,7 @@ SPREADSHEET_ID  = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPg
 SHEET_NAME      = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET    = "config"   # 設定存在這個工作表
 PORT            = int(os.environ.get("PORT", 8765))
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", ...)
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
 # ─────────────────────────────────────────────────────────────────
 
 # 執行時的 Key 列表（從 Sheets config 讀取，優先於環境變數）
