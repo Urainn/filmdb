@@ -384,6 +384,10 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_db_add()
         elif path == "/config/keys":
             self.handle_save_keys()
+        elif path == "/youtube/search":
+            self.handle_youtube_search()
+        elif path == "/youtube/batch-analyze":
+            self.handle_batch_analyze()
         elif path == "/ping":
             self.send_json(200, {"ok": True})
         else:
@@ -403,6 +407,169 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, {"ok": True})
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
+
+    def handle_youtube_search(self):
+        body = self.read_body()
+        query = body.get("query", "").strip()
+        max_results = min(int(body.get("max_results", 12)), 24)
+        if not query:
+            self.send_json(400, {"ok": False, "error": "請輸入搜尋關鍵字"})
+            return
+
+        print(f"  🔍 YouTube 搜尋：{query}")
+        url = (
+            f"https://www.googleapis.com/youtube/v3/search"
+            f"?part=snippet&type=video&videoDuration=short"
+            f"&q={urllib.parse.quote(query)}"
+            f"&maxResults={max_results}"
+            f"&key={YOUTUBE_API_KEY}"
+            f"&relevanceLanguage=zh-TW"
+        )
+        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            items = data.get("items", [])
+            results = []
+            # 取得已在資料庫的 ytId 清單
+            existing = {m.get("ytId") for m in db_read()}
+            for item in items:
+                vid_id = item["id"].get("videoId", "")
+                snippet = item.get("snippet", {})
+                results.append({
+                    "ytId": vid_id,
+                    "title": snippet.get("title", ""),
+                    "channel": snippet.get("channelTitle", ""),
+                    "publishedAt": snippet.get("publishedAt", "")[:10],
+                    "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                    "url": f"https://www.youtube.com/watch?v={vid_id}",
+                    "inDb": vid_id in existing
+                })
+            print(f"  ✓ 搜尋結果：{len(results)} 筆")
+            self.send_json(200, {"ok": True, "data": results})
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")
+            print(f"  ✗ YouTube API 錯誤 {e.code}：{err[:200]}")
+            self.send_json(200, {"ok": False, "error": f"YouTube API 錯誤：{err[:200]}"})
+        except Exception as e:
+            print(f"  ✗ 搜尋錯誤：{e}")
+            self.send_json(200, {"ok": False, "error": str(e)})
+
+    def handle_batch_analyze(self):
+        """批次分析多個 YouTube 影片並存入資料庫"""
+        body = self.read_body()
+        urls = body.get("urls", [])
+        if not urls:
+            self.send_json(400, {"ok": False, "error": "請提供影片網址清單"})
+            return
+
+        print(f"  🎬 批次分析 {len(urls)} 部影片")
+        keys = get_gemini_keys()
+        if not keys:
+            self.send_json(200, {"ok": False, "error": "未設定 Gemini API Key"})
+            return
+
+        results = []
+        for i, url_info in enumerate(urls):
+            yt_url = url_info.get("url", "")
+            yt_id = url_info.get("ytId", "")
+            print(f"  → [{i+1}/{len(urls)}] 分析：{yt_url}")
+
+            payload = {
+                "contents": [{"parts": [
+                    {"file_data": {"file_uri": yt_url}},
+                    {"text": PROMPT}
+                ]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 8192,
+                    "responseMimeType": "application/json"
+                }
+            }
+
+            current_key = get_next_key()
+            tried_keys = set()
+            success = False
+
+            for attempt in range(len(keys) * 2):
+                if not current_key or current_key in tried_keys:
+                    break
+                gemini_url = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{MODEL}:generateContent?key={current_key}"
+                )
+                req = urllib.request.Request(
+                    gemini_url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=120) as resp:
+                        raw = resp.read().decode("utf-8")
+                    data = json.loads(raw)
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    result = extract_json(text)
+                    if result:
+                        result.setdefault("title", "")
+                        result.setdefault("desc", "")
+                        result.setdefault("scenes_main", [])
+                        result.setdefault("scenes_sub", [])
+                        result.setdefault("genres", [])
+                        result.setdefault("moods", [])
+                        sm = result.get("scenes_main", [])
+                        ss = result.get("scenes_sub", [])
+                        entry = {
+                            "id": uid(),
+                            "ytId": yt_id,
+                            "url": yt_url,
+                            "title": result.get("title") or url_info.get("title", ""),
+                            "desc": result.get("desc", ""),
+                            "scenesMain": sm,
+                            "scenesSub": ss,
+                            "scenes": sm + ss,
+                            "genres": result.get("genres", []),
+                            "moods": result.get("moods", [])
+                        }
+                        # 檢查是否已存在
+                        existing_db = db_read()
+                        dup = next((m for m in existing_db if m.get("ytId") == yt_id), None)
+                        if dup:
+                            row = db_find_row(dup["id"])
+                            if row:
+                                entry["id"] = dup["id"]
+                                db_update_row(row, entry)
+                        else:
+                            db_append(entry)
+                        results.append({"ytId": yt_id, "ok": True, "title": entry["title"]})
+                        print(f"  ✓ 完成：{entry['title']}")
+                        success = True
+                        break
+                except urllib.error.HTTPError as e:
+                    if e.code == 429:
+                        tried_keys.add(current_key)
+                        current_key = get_next_key(failed_key=current_key)
+                        time.sleep(3)
+                    elif e.code == 503:
+                        time.sleep(8)
+                    else:
+                        err = e.read().decode("utf-8", errors="replace")
+                        results.append({"ytId": yt_id, "ok": False, "error": f"API 錯誤 {e.code}"})
+                        break
+                except Exception as e:
+                    results.append({"ytId": yt_id, "ok": False, "error": str(e)})
+                    break
+
+            if not success and not any(r["ytId"] == yt_id for r in results):
+                results.append({"ytId": yt_id, "ok": False, "error": "分析失敗"})
+
+            # 每部影片之間稍微等一下避免觸發限流
+            if i < len(urls) - 1:
+                time.sleep(2)
+
+        ok_count = sum(1 for r in results if r.get("ok"))
+        print(f"  ✓ 批次完成：{ok_count}/{len(urls)} 成功")
+        self.send_json(200, {"ok": True, "results": results, "success": ok_count, "total": len(urls)})
 
     def handle_save_keys(self):
         body = self.read_body()
