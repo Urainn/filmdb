@@ -1110,7 +1110,7 @@ async function saveKeys() {
 
 // ── INIT ──────────────────────────────────────────────────────────
 loadDb();  // 載入資料庫，成功後自動更新連線狀態
-setInterval(loadDb, 60000);  // 每 60 秒自動重新整理
+setInterval(loadDb, 300000);  // 每 5 分鐘自動重新整理
 
 // debug：在 console 印出 API 位址
 console.log('API endpoint:', API);
