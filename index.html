@@ -447,33 +447,25 @@ let serverOnline = false;
 
 // ── API 呼叫 ──────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
-  const url = API + path;
-  console.log(`[API] ${options.method||'GET'} ${url}`);
-  const res = await fetch(url, {
+  const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
     ...options
   });
-  console.log(`[API] 回應狀態：${res.status} ${res.statusText}`);
   const text = await res.text();
-  console.log(`[API] 回應內容前100字：${text.slice(0,100)}`);
   try {
     return JSON.parse(text);
   } catch(e) {
-    console.error('[API] 回傳非 JSON：', text.slice(0, 300));
-    throw new Error('伺服器回傳格式錯誤：' + text.slice(0, 150));
+    throw new Error('伺服器回傳格式錯誤：' + text.slice(0, 100));
   }
 }
 
 // ── 載入資料庫 ────────────────────────────────────────────────────
 async function loadDb() {
   try {
-    console.log('[loadDb] 開始載入，API =', API);
     const res = await fetch(API + '/db', {
       headers: { 'Content-Type': 'application/json' }
     });
-    console.log('[loadDb] HTTP 狀態：', res.status, res.headers.get('content-type'));
     const text = await res.text();
-    console.log('[loadDb] 回應前200字：', text.slice(0, 200));
     const r = JSON.parse(text);
     if (r.ok) {
       db = r.data;
@@ -481,11 +473,9 @@ async function loadDb() {
       renderList();
       setServerStatus(true);
     } else {
-      console.error('[loadDb] 回應 ok=false：', r);
       setServerStatus(false);
     }
   } catch(e) {
-    console.error('[loadDb] 失敗：', e.message);
     setServerStatus(false);
   }
 }
@@ -1113,7 +1103,6 @@ loadDb();  // 載入資料庫，成功後自動更新連線狀態
 setInterval(loadDb, 300000);  // 每 5 分鐘自動重新整理
 
 // debug：在 console 印出 API 位址
-console.log('API endpoint:', API);
 </script>
 </body>
 </html>
