@@ -24,7 +24,6 @@ SPREADSHEET_ID  = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPg
 SHEET_NAME      = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET    = "config"   # 設定存在這個工作表
 PORT            = int(os.environ.get("PORT", 8765))
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
 # ─────────────────────────────────────────────────────────────────
 
 # 執行時的 Key 列表（從 Sheets config 讀取，優先於環境變數）
@@ -388,7 +387,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/youtube/search":
             self.handle_youtube_search()
         elif path == "/youtube/batch-analyze":
-            self.handle_batch_analyze()
+            # 相容舊版前端：把 batch 請求轉成逐一 analyze
+            self.handle_batch_via_analyze()
         elif path == "/ping":
             self.send_json(200, {"ok": True})
         else:
@@ -455,6 +455,113 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             print(f"  ✗ 搜尋錯誤：{e}")
             self.send_json(200, {"ok": False, "error": str(e)})
+
+    def handle_batch_via_analyze(self):
+        """相容舊版前端的 batch-analyze，轉成逐一分析"""
+        body = self.read_body()
+        urls = body.get("urls", [])
+        if not urls:
+            self.send_json(400, {"ok": False, "error": "缺少 urls"})
+            return
+
+        results = []
+        keys = get_gemini_keys()
+        if not keys:
+            self.send_json(200, {"ok": False, "error": "未設定 Gemini API Key"})
+            return
+
+        for url_info in urls:
+            yt_url = url_info.get("url", "")
+            yt_id = url_info.get("ytId", "")
+            print(f"  → [batch-via-analyze] {yt_url}")
+
+            payload = {
+                "contents": [{"parts": [
+                    {"file_data": {"file_uri": yt_url}},
+                    {"text": PROMPT}
+                ]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 8192,
+                    "responseMimeType": "application/json"
+                }
+            }
+
+            current_key = get_next_key()
+            tried_keys = set()
+            success = False
+
+            for attempt in range(len(keys) * 2):
+                if not current_key or current_key in tried_keys:
+                    break
+                gemini_url = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{MODEL}:generateContent?key={current_key}"
+                )
+                req = urllib.request.Request(
+                    gemini_url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=120) as resp:
+                        raw = resp.read().decode("utf-8")
+                    data = json.loads(raw)
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    result = extract_json(text)
+                    if result:
+                        result.setdefault("title", url_info.get("title", ""))
+                        result.setdefault("desc", "")
+                        result.setdefault("scenes_main", [])
+                        result.setdefault("scenes_sub", [])
+                        result.setdefault("genres", [])
+                        result.setdefault("moods", [])
+                        sm = result.get("scenes_main", [])
+                        ss = result.get("scenes_sub", [])
+                        entry = {
+                            "id": uid(),
+                            "ytId": yt_id,
+                            "url": yt_url,
+                            "title": result.get("title") or url_info.get("title", ""),
+                            "desc": result.get("desc", ""),
+                            "scenesMain": sm, "scenesSub": ss,
+                            "scenes": sm + ss,
+                            "genres": result.get("genres", []),
+                            "moods": result.get("moods", [])
+                        }
+                        existing_db = db_read()
+                        dup = next((m for m in existing_db if m.get("ytId") == yt_id), None)
+                        if dup:
+                            row = db_find_row(dup["id"])
+                            if row:
+                                entry["id"] = dup["id"]
+                                db_update_row(row, entry)
+                        else:
+                            db_append(entry)
+                        results.append({"ytId": yt_id, "ok": True, "title": entry["title"]})
+                        print(f"  ✓ {entry['title']}")
+                        success = True
+                        break
+                except urllib.error.HTTPError as e:
+                    if e.code == 429:
+                        tried_keys.add(current_key)
+                        current_key = get_next_key(failed_key=current_key)
+                        time.sleep(3)
+                    elif e.code == 503:
+                        time.sleep(8)
+                    else:
+                        results.append({"ytId": yt_id, "ok": False, "error": f"API 錯誤 {e.code}"})
+                        break
+                except Exception as e:
+                    results.append({"ytId": yt_id, "ok": False, "error": str(e)})
+                    break
+
+            if not success and not any(r.get("ytId") == yt_id for r in results):
+                results.append({"ytId": yt_id, "ok": False, "error": "分析失敗"})
+
+        ok_count = sum(1 for r in results if r.get("ok"))
+        self.send_json(200, {"ok": True, "results": results, "success": ok_count, "total": len(urls)})
 
     def handle_batch_analyze(self):
         """批次分析多個 YouTube 影片並存入資料庫"""
