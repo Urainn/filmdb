@@ -413,7 +413,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_youtube_search(self):
         body = self.read_body()
         query = body.get("query", "").strip()
-        max_results = min(int(body.get("max_results", 12)), 24)
+        max_results = min(int(body.get("max_results", 12)), 50)
         if not query:
             self.send_json(400, {"ok": False, "error": "請輸入搜尋關鍵字"})
             return
