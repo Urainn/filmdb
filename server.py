@@ -426,6 +426,7 @@ class Handler(BaseHTTPRequestHandler):
             f"&maxResults={max_results}"
             f"&key={YOUTUBE_API_KEY}"
             f"&relevanceLanguage=zh-TW"
+            f"&regionCode=TW"
         )
         req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
         try:
@@ -447,8 +448,10 @@ class Handler(BaseHTTPRequestHandler):
                     "url": f"https://www.youtube.com/watch?v={vid_id}",
                     "inDb": vid_id in existing
                 })
-            print(f"  ✓ 搜尋結果：{len(results)} 筆")
-            self.send_json(200, {"ok": True, "data": results})
+            # 過濾掉已在資料庫的影片
+            filtered = [r for r in results if not r["inDb"]]
+            print(f"  ✓ 搜尋結果：{len(results)} 筆，過濾後 {len(filtered)} 筆（排除已在庫中）")
+            self.send_json(200, {"ok": True, "data": filtered, "total": len(results), "filtered": len(results) - len(filtered)})
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
             print(f"  ✗ YouTube API 錯誤 {e.code}：{err[:200]}")
