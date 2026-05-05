@@ -345,8 +345,28 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <button class="btn btn-accent" onclick="ytSearch()" id="btn-yt-search">🔍 搜尋</button>
     </div>
 
+    <!-- 篩選選項 -->
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;max-width:640px">
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);cursor:pointer;user-select:none">
+        <input type="checkbox" id="hide-in-db" onchange="renderYtResults()"
+          style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
+        隱藏已在資料庫的影片
+      </label>
+      <span id="yt-filter-count" style="font-size:10.5px;color:var(--text3);font-family:'DM Mono',monospace"></span>
+    </div>
+
     <!-- 搜尋狀態 -->
     <div class="sbox" id="yt-search-status" style="margin-bottom:16px;max-width:640px"></div>
+
+    <!-- 篩選列 -->
+    <div id="yt-filter-bar" style="display:none;margin-bottom:12px;align-items:center;gap:10px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);cursor:pointer;user-select:none">
+        <input type="checkbox" id="yt-hide-indb" onchange="renderYtResults()" checked
+          style="accent-color:var(--accent);width:13px;height:13px">
+        隱藏已在資料庫的影片
+      </label>
+      <span id="yt-filter-count" style="font-size:10.5px;color:var(--text3);font-family:'DM Mono',monospace"></span>
+    </div>
 
     <!-- 批次操作列 -->
     <div id="yt-batch-bar" style="display:none;margin-bottom:12px;display:none;align-items:center;gap:10px;flex-wrap:wrap">
@@ -915,6 +935,7 @@ async function ytSearch() {
   document.getElementById('btn-yt-search').disabled = true;
   document.getElementById('yt-results-grid').innerHTML = '';
   document.getElementById('yt-batch-bar').style.display = 'none';
+  document.getElementById('yt-filter-bar').style.display = 'none';
   ytSelected.clear();
 
   try {
@@ -925,8 +946,10 @@ async function ytSearch() {
     if (!r.ok) throw new Error(r.error);
     ytResults = r.data;
     renderYtResults();
+    document.getElementById('yt-filter-bar').style.display = 'flex';
+    const inDbCount = ytResults.filter(v => v.inDb).length;
     st.className = 'sbox show ok';
-    st.textContent = `✓ 找到 ${ytResults.length} 筆結果，點擊卡片選取`;
+    st.textContent = `✓ 找到 ${ytResults.length} 筆結果${inDbCount > 0 ? `（${inDbCount} 部已在庫）` : ''}，點擊卡片選取`;
   } catch(e) {
     st.className = 'sbox show err';
     st.textContent = '✗ 搜尋失敗：' + e.message;
@@ -938,7 +961,23 @@ function renderYtResults() {
   const grid = document.getElementById('yt-results-grid');
   if (!ytResults.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:12px">沒有搜尋結果</div>'; return; }
 
-  grid.innerHTML = ytResults.map((v, i) => `
+  const hideInDb = document.getElementById('yt-hide-indb')?.checked ?? true;
+  const filtered = hideInDb ? ytResults.filter(v => !v.inDb) : ytResults;
+
+  // 更新篩選統計
+  const filterCount = document.getElementById('yt-filter-count');
+  if (filterCount) {
+    const inDbCount = ytResults.filter(v => v.inDb).length;
+    filterCount.textContent = inDbCount > 0 ? `已篩掉 ${inDbCount} 部已在庫的影片` : '';
+  }
+
+  if (!filtered.length) {
+    grid.innerHTML = '<div style="color:var(--text3);font-size:12px">所有結果都已在資料庫中</div>';
+    updateYtBatchBar();
+    return;
+  }
+
+  grid.innerHTML = filtered.map((v) => `
     <div class="yt-card ${v.inDb ? 'in-db' : ''} ${ytSelected.has(v.ytId) ? 'selected' : ''}"
       onclick="ytToggle('${v.ytId}', ${v.inDb})" id="ytcard-${v.ytId}">
       <div class="yt-check">${ytSelected.has(v.ytId) ? '✓' : ''}</div>
@@ -969,7 +1008,9 @@ function ytToggle(ytId, inDb) {
 }
 
 function ytSelectAll() {
-  ytResults.filter(v => !v.inDb).forEach(v => ytSelected.add(v.ytId));
+  const hideInDb = document.getElementById('hide-in-db')?.checked;
+  const visible = hideInDb ? ytResults.filter(v => !v.inDb) : ytResults;
+  visible.filter(v => !v.inDb).forEach(v => ytSelected.add(v.ytId));
   renderYtResults();
 }
 
