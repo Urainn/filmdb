@@ -335,14 +335,20 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <!-- 搜尋列 -->
     <div style="display:flex;gap:8px;margin-bottom:20px;max-width:640px">
       <input class="search-inp" id="yt-search-q" type="text"
-        placeholder="例如：2024 台灣電影預告片、horror movie trailer 2025..."
+        placeholder="輸入中文關鍵字，例如：2024 台灣電影預告、2025 華語電影預告片..."
         onkeydown="if(event.key==='Enter')ytSearch()">
       <select id="yt-search-count" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none">
         <option value="12">12 筆</option>
-        <option value="18">18 筆</option>
         <option value="24">24 筆</option>
+        <option value="36">36 筆</option>
+        <option value="50">50 筆</option>
       </select>
       <button class="btn btn-accent" onclick="ytSearch()" id="btn-yt-search">🔍 搜尋</button>
+    </div>
+
+    <!-- 搜尋提示 -->
+    <div style="font-size:10.5px;color:var(--text3);margin-bottom:10px;max-width:640px">
+      💡 建議加入「台灣」「中文」「華語」等關鍵字，搜尋結果更精準
     </div>
 
     <!-- 篩選選項 -->
@@ -373,6 +379,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <span id="yt-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace"></span>
       <button class="btn btn-sm" onclick="ytSelectAll()">全選</button>
       <button class="btn btn-sm" onclick="ytSelectNone()">取消全選</button>
+      <button class="btn btn-sm" onclick="ytSortSelected()" title="把已勾選的移到最前面">↑ 已選移前</button>
       <button class="btn btn-accent" id="btn-batch-analyze" onclick="ytBatchAnalyze()" disabled>
         ✦ 批次分析並存入資料庫
       </button>
@@ -1017,6 +1024,19 @@ function ytSelectAll() {
 function ytSelectNone() {
   ytSelected.clear();
   renderYtResults();
+}
+
+function ytSortSelected() {
+  if (ytSelected.size === 0) {
+    toast('請先勾選要保留在前面的影片', 'err');
+    return;
+  }
+  // 已勾選的移到前面，其他的移到後面，各自保持原順序
+  const selected = ytResults.filter(v => ytSelected.has(v.ytId));
+  const rest = ytResults.filter(v => !ytSelected.has(v.ytId));
+  ytResults = [...selected, ...rest];
+  renderYtResults();
+  toast(`已將 ${selected.length} 部勾選影片移到最前面`, 'ok');
 }
 
 function updateYtBatchBar() {
