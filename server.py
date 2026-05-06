@@ -1,89 +1,159 @@
-#!/usr/bin/env python3
-"""
-FilmDB cloud server - Google Sheets version.
-"""
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from socketserver import ThreadingMixIn
-import urllib.request
-import urllib.error
-import urllib.parse
-import json
-import re
-import os
-import time
-import threading
-import base64
-import sys
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
-SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
-SHEET_NAME = os.environ.get("SHEET_NAME", "films")
-CONFIG_SHEET = "config"
-PORT = int(os.environ.get("PORT", 8765))
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
-MODEL = "gemini-2.5-flash"
-PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物件，絕對不要加任何說明文字或 markdown。
-請嚴格按照以下格式，每個陣列都必須填入至少 2 個值：
-{
-  "title": "電影中文片名",
-  "desc": "25字內的劇情簡介",
-  "scenes_main": ["主要場景，只填地點名稱，如：城市、雪地、叢林、太空、海洋、沙漠、戰場、屋頂、地下室、商場、學校、森林、宮殿"],
-  "scenes_sub": ["次要場景，只填地點名稱，如：室內、實驗室、走廊、監獄、停車場、醫院、車廂、辦公室"],
-  "genres": ["電影類型，如：動作、愛情、科幻、懸疑、恐怖、喜劇、奇幻、歷史、動畫、驚悚"],
-  "moods": ["情感氛圍，如：緊張、浪漫、感動、壯闊、孤獨、溫馨、黑暗、燒腦、熱血、悲傷"]
-}
-重要規則：
-1. scenes_main 和 scenes_sub 只填純粹的地點名稱，不加任何形容詞
-2. 每個陣列至少填 2 個值
-3. 就算不確定也要根據影片畫面猜測填入"""
-_token_cache = {"token": None, "expires": 0}
-_token_lock = threading.Lock()
-_gemini_keys = []
-_key_lock = threading.Lock()
-_key_index = 0
-_sheet_id_cache = None
-def get_access_token():
-    with _token_lock:
-        if _token_cache["token"] and time.time() < _token_cache["expires"] - 60:
-            return _token_cache["token"]
-        if not SHEETS_CREDS:
-            raise Exception("未設定 SHEETS_CREDS")
-        creds = json.loads(SHEETS_CREDS)
-        now = int(time.time())
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": "RS256", "typ": "JWT"}).encode()
-        ).rstrip(b"=").decode()
-        payload = base64.urlsafe_b64encode(
-            json.dumps({
-                "iss": creds["client_email"],
-                "scope": "https://www.googleapis.com/auth/spreadsheets",
-                "aud": "https://oauth2.googleapis.com/token",
-                "exp": now + 3600,
-                "iat": now,
-            }).encode()
-        ).rstrip(b"=").decode()
+        if path.startswith("/db/"):
+            movie_id = path[4:]
+            row_num = db_find_row(movie_id)
+            if row_num is None:
+                self.send_json(404, {"ok": False, "error": "找不到此 ID"})
+            else:
+                db_delete_row(row_num)
+                self.send_json(200, {"ok": True})
+        else:
+            self.send_json(404, {"ok": False, "error": "not found"})
+    def handle_analyze(self):
+        body = self.read_body()
+        yt_url = body.get("url", "").strip()
+        if not yt_url:
+            self.send_json(400, {"ok": False, "error": "缺少 url"})
+            return
+        self.send_json(200, call_gemini_analyze(yt_url))
+    def handle_db_add(self):
+        body = self.read_body()
+        if not body.get("title") or not body.get("ytId"):
+            self.send_json(400, {"ok": False, "error": "缺少 title 或 ytId"})
+            return
+        if not body.get("id"):
+            body["id"] = uid()
         try:
-            from cryptography.hazmat.primitives import serialization, hashes
-            from cryptography.hazmat.primitives.asymmetric import padding
-            from cryptography.hazmat.backends import default_backend
-            private_key = serialization.load_pem_private_key(
-                creds["private_key"].encode(),
-                password=None,
-                backend=default_backend(),
-            )
-            signing_input = f"{header}.{payload}".encode()
-            signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
-            sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
-        except ImportError:
-            raise Exception("缺少 cryptography 套件")
-        jwt_token = f"{header}.{payload}.{sig_b64}"
-        token_body = (
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer"
-            "&assertion=" + urllib.parse.quote(jwt_token)
-        ).encode()
-        req = urllib.request.Request(
-            "https://oauth2.googleapis.com/token",
-            data=token_body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST",
-        )
+            row_num = db_find_row(body["id"])
+            if row_num:
+                db_update_row(row_num, body)
+            else:
+                db_append(body)
+            self.send_json(200, {"ok": True, "data": body})
+        except Exception as e:
+            self.send_json(200, {"ok": False, "error": f"寫入資料庫失敗: {str(e)}"})
+    def handle_save_keys(self):
+        body = self.read_body()
+        keys = body.get("keys", [])
+        if not isinstance(keys, list) or not keys:
+            self.send_json(400, {"ok": False, "error": "請提供 keys 陣列"})
+            return
+        keys = [k.strip() for k in keys if k.strip()]
+        ok = save_gemini_keys(keys)
+        self.send_json(200, {"ok": ok, "count": len(keys)} if ok else {"ok": False, "error": "儲存失敗"})
+    def handle_youtube_search(self):
+        body = self.read_body()
+        query = body.get("query", "").strip()
+        max_results = min(int(body.get("max_results", 12)), 50)
+        page_token = body.get("page_token", "").strip()
+        exclude_ids = set(body.get("exclude_ids") or [])
+        if not query:
+            self.send_json(400, {"ok": False, "error": "請輸入搜尋關鍵字"})
+            return
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "videoDuration": "short",
+            "q": query,
+            "maxResults": str(max_results),
+            "key": YOUTUBE_API_KEY,
+            "relevanceLanguage": "zh-TW",
+            "regionCode": "TW",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        url = f"https://www.googleapis.com/youtube/v3/search?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            existing = {m.get("ytId") for m in db_read()}
+            results = []
+            for item in data.get("items", []):
+                vid_id = item.get("id", {}).get("videoId", "")
+                if not vid_id:
+                    continue
+                snippet = item.get("snippet", {})
+                results.append({
+                    "ytId": vid_id,
+                    "title": snippet.get("title", ""),
+                    "channel": snippet.get("channelTitle", ""),
+                    "publishedAt": snippet.get("publishedAt", "")[:10],
+                    "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                    "url": f"https://www.youtube.com/watch?v={vid_id}",
+                    "inDb": vid_id in existing,
+                })
+            filtered = [r for r in results if not r["inDb"] and r["ytId"] not in exclude_ids]
+            self.send_json(200, {
+                "ok": True,
+                "data": filtered,
+                "total": len(results),
+                "filtered": len(results) - len(filtered),
+                "nextPageToken": data.get("nextPageToken", ""),
+            })
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")
+            self.send_json(200, {"ok": False, "error": f"YouTube API 錯誤: {err[:200]}"})
+        except Exception as e:
+            self.send_json(200, {"ok": False, "error": str(e)})
+    def handle_batch_analyze(self):
+        body = self.read_body()
+        urls = body.get("urls", [])
+        if not urls:
+            self.send_json(400, {"ok": False, "error": "缺少 urls"})
+            return
+        results = []
+        for i, url_info in enumerate(urls):
+            yt_url = url_info.get("url", "")
+            yt_id = url_info.get("ytId", "")
+            result = call_gemini_analyze(yt_url)
+            if result.get("ok"):
+                p = result["data"]
+                sm = p.get("scenes_main", [])
+                ss = p.get("scenes_sub", [])
+                entry = {
+                    "id": uid(),
+                    "ytId": yt_id,
+                    "url": yt_url,
+                    "title": p.get("title") or url_info.get("title", ""),
+                    "desc": p.get("desc", ""),
+                    "scenesMain": sm,
+                    "scenesSub": ss,
+                    "scenes": sm + ss,
+                    "genres": p.get("genres", []),
+                    "moods": p.get("moods", []),
+                }
+                existing = db_read()
+                dup = next((m for m in existing if m.get("ytId") == yt_id), None)
+                if dup:
+                    row = db_find_row(dup["id"])
+                    if row:
+                        entry["id"] = dup["id"]
+                        db_update_row(row, entry)
+                else:
+                    db_append(entry)
+                results.append({"ytId": yt_id, "ok": True, "title": entry["title"]})
+            else:
+                results.append({"ytId": yt_id, "ok": False, "error": result.get("error", "分析失敗")})
+            if i < len(urls) - 1:
+                time.sleep(2)
+        ok_count = sum(1 for r in results if r.get("ok"))
+        self.send_json(200, {"ok": True, "results": results, "success": ok_count, "total": len(urls)})
+class ThreadedServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+def main():
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+    print("=" * 52)
+    print("FilmDB server starting")
+    print(f"PORT  : {PORT}")
+    print(f"SHEET : {SPREADSHEET_ID}")
+    print(f"MODEL : {MODEL}")
+    print("=" * 52)
+    ensure_sheet()
+    server = ThreadedServer(("0.0.0.0", PORT), Handler)
+    print(f"Server running on 0.0.0.0:{PORT}")
+    server.serve_forever()
+if __name__ == "__main__":
+    main()
