@@ -379,7 +379,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <span id="yt-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace"></span>
       <button class="btn btn-sm" onclick="ytSelectAll()">全選</button>
       <button class="btn btn-sm" onclick="ytSelectNone()">取消全選</button>
-      <button class="btn btn-sm" onclick="ytSortSelected()" title="把已勾選的移到最前面">↑ 已選移前</button>
+      <button class="btn btn-sm" onclick="ytRefresh()" id="btn-yt-refresh" title="保留已勾選，重新搜尋補充新結果">↻ 重新整理結果</button>
       <button class="btn btn-accent" id="btn-batch-analyze" onclick="ytBatchAnalyze()" disabled>
         ✦ 批次分析並存入資料庫
       </button>
@@ -1026,17 +1026,43 @@ function ytSelectNone() {
   renderYtResults();
 }
 
-function ytSortSelected() {
-  if (ytSelected.size === 0) {
-    toast('請先勾選要保留在前面的影片', 'err');
-    return;
+async function ytRefresh() {
+  const q = document.getElementById('yt-search-q').value.trim();
+  if (!q) { toast('請先輸入搜尋關鍵字', 'err'); return; }
+
+  const maxResults = document.getElementById('yt-search-count').value;
+  const btn = document.getElementById('btn-yt-refresh');
+  btn.disabled = true;
+
+  // 保留已勾選的影片
+  const kept = ytResults.filter(v => ytSelected.has(v.ytId));
+  const keptIds = new Set(ytResults.map(v => v.ytId)); // 排除已出現過的
+
+  const st = document.getElementById('yt-search-status');
+  st.className = 'sbox show loading';
+  st.innerHTML = `<span class="spin"></span> 重新整理中，保留 ${kept.length} 部已勾選影片...`;
+
+  try {
+    const r = await apiFetch('/youtube/search', {
+      method: 'POST',
+      body: JSON.stringify({ query: q, max_results: parseInt(maxResults), exclude_ids: [...keptIds] })
+    });
+    if (!r.ok) throw new Error(r.error);
+
+    // 新結果排除已出現過的
+    const newResults = r.data.filter(v => !keptIds.has(v.ytId));
+
+    // 已勾選的放前面，新結果放後面
+    ytResults = [...kept, ...newResults];
+
+    renderYtResults();
+    st.className = 'sbox show ok';
+    st.textContent = `✓ 已保留 ${kept.length} 部勾選影片，新增 ${newResults.length} 部新結果`;
+  } catch(e) {
+    st.className = 'sbox show err';
+    st.textContent = '✗ 重新整理失敗：' + e.message;
   }
-  // 已勾選的移到前面，其他的移到後面，各自保持原順序
-  const selected = ytResults.filter(v => ytSelected.has(v.ytId));
-  const rest = ytResults.filter(v => !ytSelected.has(v.ytId));
-  ytResults = [...selected, ...rest];
-  renderYtResults();
-  toast(`已將 ${selected.length} 部勾選影片移到最前面`, 'ok');
+  btn.disabled = false;
 }
 
 function updateYtBatchBar() {
