@@ -49,6 +49,65 @@ def get_access_token():
     with _token_lock:
         if _token_cache["token"] and time.time() < _token_cache["expires"] - 60:
             return _token_cache["token"]
+
+        creds = json.loads(SHEETS_CREDS)
+        now = int(time.time())
+
+        header = base64.urlsafe_b64encode(
+            json.dumps({"alg": "RS256", "typ": "JWT"}).encode()
+        ).rstrip(b"=").decode()
+
+        payload = base64.urlsafe_b64encode(
+            json.dumps({
+                "iss": creds["client_email"],
+                "scope": "https://www.googleapis.com/auth/spreadsheets",
+                "aud": "https://oauth2.googleapis.com/token",
+                "exp": now + 3600,
+                "iat": now
+            }).encode()
+        ).rstrip(b"=").decode()
+
+        try:
+            from cryptography.hazmat.primitives import serialization, hashes
+            from cryptography.hazmat.primitives.asymmetric import padding
+            from cryptography.hazmat.backends import default_backend
+
+            private_key = serialization.load_pem_private_key(
+                creds["private_key"].encode(),
+                password=None,
+                backend=default_backend()
+            )
+
+            signing_input = f"{header}.{payload}".encode()
+            signature = private_key.sign(
+                signing_input,
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+            sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
+
+        except ImportError:
+            raise Exception("缺少 cryptography 套件")
+
+        jwt_token = f"{header}.{payload}.{sig_b64}"
+
+        req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token",
+            data=urllib.parse.urlencode({
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": jwt_token
+            }).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            token_data = json.loads(resp.read())
+
+        _token_cache["token"] = token_data["access_token"]
+        _token_cache["expires"] = now + token_data.get("expires_in", 3600)
+        return _token_cache["token"]
+
         creds = json.loads(SHEETS_CREDS)
         now = int(time.time())
         # 建立 JWT
