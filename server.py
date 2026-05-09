@@ -973,7 +973,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": uid(),
                     "ytId": yt_id,
                     "url": yt_url,
-                    "title": p.get("title") or url_info.get("title", ""),
+                    "title": url_info.get("title", "") or p.get("title", ""),
                     "desc": p.get("desc", ""),
                     "scenesMain": sm,
                     "scenesSub": ss,
@@ -1028,6 +1028,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
 
 
 
