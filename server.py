@@ -3,6 +3,7 @@
 FilmDB cloud server - Google Sheets version.
 """
 
+
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import urllib.request
@@ -17,6 +18,8 @@ import base64
 import sys
 
 
+
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
@@ -26,7 +29,9 @@ PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 
+
 MODEL = "gemini-2.5-flash"
+
 
 PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物件，絕對不要加任何說明文字或 markdown。
 請嚴格按照以下格式，每個陣列都必須填入至少 2 個值：
@@ -44,6 +49,7 @@ PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物�
 3. 就算不確定也要根據影片畫面猜測填入
 4. 所有輸出都必須使用台灣繁體中文，不可以出現簡體中文"""
 
+
 _token_cache = {"token": None, "expires": 0}
 _token_lock = threading.Lock()
 _gemini_keys = []
@@ -52,12 +58,15 @@ _key_index = 0
 _sheet_id_cache = None
 
 
+
+
 def get_access_token():
     with _token_lock:
         if _token_cache["token"] and time.time() < _token_cache["expires"] - 60:
             return _token_cache["token"]
         if not SHEETS_CREDS:
             raise Exception("未設定 SHEETS_CREDS")
+
 
         creds = json.loads(SHEETS_CREDS)
         now = int(time.time())
@@ -74,6 +83,7 @@ def get_access_token():
             }).encode()
         ).rstrip(b"=").decode()
 
+
         try:
             from cryptography.hazmat.primitives import serialization, hashes
             from cryptography.hazmat.primitives.asymmetric import padding
@@ -88,6 +98,7 @@ def get_access_token():
             sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
         except ImportError:
             raise Exception("缺少 cryptography 套件")
+
 
         jwt_token = f"{header}.{payload}.{sig_b64}"
         token_body = (
@@ -107,7 +118,11 @@ def get_access_token():
         return _token_cache["token"]
 
 
+
+
 SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
+
+
 
 
 def sheets_request(method, path, body=None):
@@ -131,6 +146,8 @@ def sheets_request(method, path, body=None):
         raise Exception(f"Sheets API 錯誤 {e.code}: {err[:200]}")
 
 
+
+
 def ensure_sheet():
     try:
         info = sheets_request("GET", "")
@@ -144,6 +161,8 @@ def ensure_sheet():
         print(f"  ensure_sheet 錯誤: {e}")
 
 
+
+
 def ensure_config_sheet():
     try:
         info = sheets_request("GET", "")
@@ -154,6 +173,8 @@ def ensure_config_sheet():
             })
     except Exception as e:
         print(f"  ensure_config_sheet 錯誤: {e}")
+
+
 
 
 def get_gemini_keys():
@@ -173,6 +194,8 @@ def get_gemini_keys():
         except Exception as e:
             print(f"  讀取 config 失敗: {e}")
         return [GEMINI_API_KEY] if GEMINI_API_KEY else []
+
+
 
 
 def save_gemini_keys(keys):
@@ -196,6 +219,8 @@ def save_gemini_keys(keys):
         return False
 
 
+
+
 def get_next_key(failed_key=None):
     global _key_index
     keys = get_gemini_keys()
@@ -207,6 +232,8 @@ def get_next_key(failed_key=None):
         key = keys[_key_index % len(keys)]
         _key_index = (_key_index + 1) % len(keys)
         return key
+
+
 
 
 def db_read():
@@ -226,6 +253,8 @@ def db_read():
         return []
 
 
+
+
 def db_find_row(movie_id):
     try:
         encoded = urllib.parse.quote(f"{SHEET_NAME}!A:A")
@@ -242,6 +271,8 @@ def db_find_row(movie_id):
     return None
 
 
+
+
 def db_append(record):
     encoded = urllib.parse.quote(f"{SHEET_NAME}!A:A")
     return sheets_request(
@@ -251,6 +282,8 @@ def db_append(record):
     )
 
 
+
+
 def db_update_row(row_num, record):
     encoded = urllib.parse.quote(f"{SHEET_NAME}!A{row_num}")
     return sheets_request(
@@ -258,6 +291,8 @@ def db_update_row(row_num, record):
         f"/values/{encoded}?valueInputOption=RAW",
         {"values": [[json.dumps(record, ensure_ascii=False)]]},
     )
+
+
 
 
 def get_sheet_id():
@@ -270,6 +305,8 @@ def get_sheet_id():
             _sheet_id_cache = s["properties"]["sheetId"]
             return _sheet_id_cache
     return 0
+
+
 
 
 def db_delete_row(row_num):
@@ -287,10 +324,14 @@ def db_delete_row(row_num):
     })
 
 
+
+
 def uid():
     import random
     import string
     return "u" + str(int(time.time())) + "".join(random.choices(string.ascii_lowercase, k=4))
+
+
 
 
 def extract_json(text):
@@ -310,6 +351,8 @@ def extract_json(text):
         except Exception:
             pass
     return None
+
+
 
 
 PHRASE_TW = {
@@ -361,6 +404,7 @@ PHRASE_TW = {
     "浪漫": "浪漫",
 }
 
+
 CHAR_TW = str.maketrans({
     "军": "軍", "事": "事", "基": "基", "地": "地", "休": "休", "憩": "憩",
     "颁": "頒", "奖": "獎", "台": "台", "办": "辦", "实": "實", "验": "驗",
@@ -385,6 +429,8 @@ CHAR_TW = str.maketrans({
 })
 
 
+
+
 def to_traditional_text(value):
     if isinstance(value, str):
         text = value
@@ -398,11 +444,15 @@ def to_traditional_text(value):
     return value
 
 
+
+
 def normalize_analysis_result(result):
     for key in ["title", "desc", "scenes_main", "scenes_sub", "genres", "moods"]:
         if key in result:
             result[key] = to_traditional_text(result[key])
     return result
+
+
 
 
 def call_gemini_analyze(yt_url):
@@ -465,10 +515,25 @@ def call_gemini_analyze(yt_url):
     return {"ok": False, "error": "Gemini 分析重試次數已用完"}
 
 
+
+
 def call_gemini_tmdb(item):
     keys = get_gemini_keys()
     if not keys:
         return {"ok": False, "error": "未設定 Gemini API Key"}
+
+    # TMDB search results can include a YouTube trailer URL. Prefer video analysis
+    # so scene tags come from the trailer visuals instead of TMDB synopsis guesses.
+    trailer_url = (item.get("url") or "").strip()
+    if trailer_url and ("youtube.com" in trailer_url or "youtu.be" in trailer_url):
+        video_result = call_gemini_analyze(trailer_url)
+        if video_result.get("ok") and isinstance(video_result.get("data"), dict):
+            data = video_result["data"]
+            if item.get("title"):
+                data["title"] = item.get("title")
+            return {"ok": True, "data": data}
+        # Fall through to the text-only TMDB analysis if trailer analysis fails.
+
 
     media_label = "影劇" if item.get("mediaType") == "tv" else "電影"
     text_prompt = f"""請根據以下 TMDB {media_label}資料，產生和預告片分析相同格式的 JSON。
@@ -489,6 +554,7 @@ def call_gemini_tmdb(item):
   "moods": ["情感氛圍"]
 }}"""
 
+
     payload = {
         "contents": [{"parts": [{"text": text_prompt}]}],
         "generationConfig": {
@@ -497,6 +563,7 @@ def call_gemini_tmdb(item):
             "responseMimeType": "application/json",
         },
     }
+
 
     current_key = get_next_key()
     max_attempts = max(3, len(keys) * 2)
@@ -541,6 +608,8 @@ def call_gemini_tmdb(item):
     return {"ok": False, "error": "Gemini 分析重試次數已用完"}
 
 
+
+
 def tmdb_request(path, params=None):
     if not TMDB_API_KEY:
         raise Exception("未設定 TMDB_API_KEY")
@@ -553,12 +622,16 @@ def tmdb_request(path, params=None):
         return json.loads(resp.read().decode("utf-8"))
 
 
+
+
 def tmdb_genres(media_type):
     try:
         data = tmdb_request(f"/genre/{media_type}/list")
         return {g["id"]: g["name"] for g in data.get("genres", [])}
     except Exception:
         return {}
+
+
 
 
 def tmdb_trailer(media_type, tmdb_id):
@@ -576,6 +649,8 @@ def tmdb_trailer(media_type, tmdb_id):
         return yt_id, f"https://www.youtube.com/watch?v={yt_id}" if yt_id else ""
     except Exception:
         return "", ""
+
+
 
 
 def tmdb_to_result(item, media_type, genre_map, existing_ids):
@@ -607,14 +682,18 @@ def tmdb_to_result(item, media_type, genre_map, existing_ids):
     }
 
 
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"  {format % args}")
+
 
     def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
 
     def send_json(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -625,6 +704,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+
     def send_html(self, html):
         body = html.encode("utf-8")
         self.send_response(200)
@@ -632,6 +712,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
 
     def read_body(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -642,10 +723,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+
     def do_OPTIONS(self):
         self.send_response(200)
         self.cors()
         self.end_headers()
+
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -665,6 +748,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(404, {"ok": False, "error": "index.html 不存在"})
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
+
 
     def do_POST(self):
         path = self.path.split("?")[0]
@@ -688,6 +772,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json(404, {"ok": False, "error": f"未知路徑: {path}"})
 
+
     def do_DELETE(self):
         path = self.path.split("?")[0]
         if path.startswith("/db/"):
@@ -701,6 +786,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
 
+
     def handle_analyze(self):
         body = self.read_body()
         yt_url = body.get("url", "").strip()
@@ -708,6 +794,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": "缺少 url"})
             return
         self.send_json(200, call_gemini_analyze(yt_url))
+
 
     def handle_db_add(self):
         body = self.read_body()
@@ -726,6 +813,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": f"寫入資料庫失敗: {str(e)}"})
 
+
     def handle_save_keys(self):
         body = self.read_body()
         keys = body.get("keys", [])
@@ -735,6 +823,7 @@ class Handler(BaseHTTPRequestHandler):
         keys = [k.strip() for k in keys if k.strip()]
         ok = save_gemini_keys(keys)
         self.send_json(200, {"ok": ok, "count": len(keys)} if ok else {"ok": False, "error": "儲存失敗"})
+
 
     def handle_youtube_search(self):
         body = self.read_body()
@@ -792,6 +881,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
+
     def handle_tmdb_search(self):
         body = self.read_body()
         query = body.get("query", "").strip()
@@ -802,6 +892,7 @@ class Handler(BaseHTTPRequestHandler):
         year = str(body.get("year", "")).strip()
         max_results = min(int(body.get("max_results", 20) or 20), 50)
         exclude_ids = set(body.get("exclude_ids") or [])
+
 
         try:
             if query:
@@ -825,6 +916,7 @@ class Handler(BaseHTTPRequestHandler):
                         params["first_air_date_year"] = year
                 data = tmdb_request(f"/discover/{media_type}", params)
 
+
             existing_ids = {
                 f"tmdb-{m.get('mediaType')}-{m.get('tmdbId')}"
                 for m in db_read()
@@ -837,6 +929,7 @@ class Handler(BaseHTTPRequestHandler):
                 key = f"tmdb-{media_type}-{result['tmdbId']}"
                 if key not in exclude_ids and not result["inDb"]:
                     results.append(result)
+
 
             self.send_json(200, {
                 "ok": True,
@@ -851,6 +944,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
+
     def handle_tmdb_analyze(self):
         body = self.read_body()
         item = body.get("item") or {}
@@ -858,6 +952,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": "缺少 TMDB 作品資料"})
             return
         self.send_json(200, call_gemini_tmdb(item))
+
 
     def handle_batch_analyze(self):
         body = self.read_body()
@@ -904,8 +999,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(200, {"ok": True, "results": results, "success": ok_count, "total": len(urls)})
 
 
+
+
 class ThreadedServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
+
+
 
 
 def main():
@@ -925,5 +1024,11 @@ def main():
     server.serve_forever()
 
 
+
+
 if __name__ == "__main__":
     main()
+
+
+
+
