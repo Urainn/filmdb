@@ -1263,7 +1263,7 @@ async function ytBatchAnalyze() {
           tmdbId: item.tmdbId || '',
           ytId: item.ytId || `tmdb-${item.mediaType || 'movie'}-${item.tmdbId}`,
           url: item.url,
-          title: p.title || item.title,
+          title: item.title || p.title,
           desc: p.desc || '',
           poster: item.poster || item.thumb || '',
           thumb: item.thumb || item.poster || '',
