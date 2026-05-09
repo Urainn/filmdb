@@ -333,7 +333,16 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
 
     <!-- 搜尋列 -->
-    <div style="display:flex;gap:8px;margin-bottom:20px;max-width:640px">
+    <div style="display:flex;gap:8px;margin-bottom:20px;max-width:820px;flex-wrap:wrap">
+      <select id="search-source" onchange="onSearchSourceChange()" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none">
+        <option value="youtube">YouTube</option>
+        <option value="tmdb">TMDB</option>
+      </select>
+      <select id="media-type" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none">
+        <option value="movie">電影</option>
+        <option value="tv">影劇</option>
+      </select>
+      <input class="search-inp" id="tmdb-year" type="text" inputmode="numeric" maxlength="4" placeholder="年份" style="display:none;max-width:90px">
       <input class="search-inp" id="yt-search-q" type="text"
         placeholder="輸入中文關鍵字，例如：2024 台灣電影預告、2025 華語電影預告片..."
         onkeydown="if(event.key==='Enter')ytSearch()">
@@ -571,7 +580,7 @@ function renderList() {
   body.innerHTML = rows.map(m => `
     <tr>
       <td>
-        <img class="thumb" src="https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg"
+        <img class="thumb" src="${m.poster || m.thumb || `https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg`}"
           onclick="playVideo('${m.ytId}','${esc(m.title)}')"
           title="▶ 點擊播放"
           style="cursor:pointer;transition:opacity 0.15s"
@@ -931,6 +940,31 @@ function toast(msg, type='') {
 let ytResults = [];
 let ytSelected = new Set();
 let ytNextPageToken = '';
+let tmdbNextPage = 1;
+
+function getSearchSource() {
+  return document.getElementById('search-source')?.value || 'youtube';
+}
+
+function getMediaType() {
+  return document.getElementById('media-type')?.value || 'movie';
+}
+
+function onSearchSourceChange() {
+  const isTmdb = getSearchSource() === 'tmdb';
+  const mediaType = document.getElementById('media-type');
+  const year = document.getElementById('tmdb-year');
+  const q = document.getElementById('yt-search-q');
+  if (mediaType) mediaType.style.display = isTmdb ? 'block' : 'none';
+  if (year) year.style.display = isTmdb ? 'block' : 'none';
+  if (q) q.placeholder = isTmdb ? '搜尋 TMDB，例如：沙丘、Moving、2024 熱門影劇' : '輸入中文關鍵字，例如：2024 台灣電影預告、2025 華語電影預告片...';
+  ytResults = [];
+  ytSelected.clear();
+  ytNextPageToken = '';
+  tmdbNextPage = 1;
+  document.getElementById('yt-results-grid').innerHTML = '';
+  updateYtBatchBar();
+}
 
 async function ytSearch() {
   const q = document.getElementById('yt-search-q').value.trim();
@@ -946,15 +980,27 @@ async function ytSearch() {
   document.getElementById('yt-filter-bar').style.display = 'none';
   ytSelected.clear();
   ytNextPageToken = '';
+  tmdbNextPage = 1;
 
   try {
-    const r = await apiFetch('/youtube/search', {
+    const isTmdb = getSearchSource() === 'tmdb';
+    const r = await apiFetch(isTmdb ? '/tmdb/search' : '/youtube/search', {
       method: 'POST',
-      body: JSON.stringify({ query: q, max_results: parseInt(maxResults) })
+      body: JSON.stringify(isTmdb ? {
+        query: q,
+        max_results: parseInt(maxResults),
+        media_type: getMediaType(),
+        year: document.getElementById('tmdb-year')?.value.trim() || '',
+        page: 1
+      } : {
+        query: q,
+        max_results: parseInt(maxResults)
+      })
     });
     if (!r.ok) throw new Error(r.error);
     ytResults = r.data;
     ytNextPageToken = r.nextPageToken || '';
+    tmdbNextPage = r.nextPage || null;
     renderYtResults();
     document.getElementById('yt-filter-bar').style.display = 'flex';
     const inDbCount = ytResults.filter(v => v.inDb).length;
@@ -1078,6 +1124,58 @@ async function ytRefresh() {
   btn.disabled = false;
 }
 
+async function ytRefresh() {
+  const q = document.getElementById('yt-search-q').value.trim();
+  if (!q) { toast('請先輸入搜尋關鍵字', 'err'); return; }
+  const isTmdb = getSearchSource() === 'tmdb';
+  if ((!isTmdb && !ytNextPageToken) || (isTmdb && !tmdbNextPage)) {
+    toast('已經沒有更多搜尋結果可載入', 'err');
+    return;
+  }
+
+  const maxResults = document.getElementById('yt-search-count').value;
+  const btn = document.getElementById('btn-yt-refresh');
+  btn.disabled = true;
+
+  const kept = ytResults.filter(v => ytSelected.has(v.ytId));
+  const keptIds = new Set(ytResults.map(v => v.ytId));
+  const st = document.getElementById('yt-search-status');
+  st.className = 'sbox show loading';
+  st.innerHTML = `<span class="spin"></span> 重新整理中，保留 ${kept.length} 部已勾選作品...`;
+
+  try {
+    const r = await apiFetch(isTmdb ? '/tmdb/search' : '/youtube/search', {
+      method: 'POST',
+      body: JSON.stringify(isTmdb ? {
+        query: q,
+        max_results: parseInt(maxResults),
+        exclude_ids: [...keptIds],
+        media_type: getMediaType(),
+        year: document.getElementById('tmdb-year')?.value.trim() || '',
+        page: tmdbNextPage
+      } : {
+        query: q,
+        max_results: parseInt(maxResults),
+        exclude_ids: [...keptIds],
+        page_token: ytNextPageToken
+      })
+    });
+    if (!r.ok) throw new Error(r.error);
+    ytNextPageToken = r.nextPageToken || '';
+    tmdbNextPage = r.nextPage || null;
+
+    const newResults = r.data.filter(v => !keptIds.has(v.ytId));
+    ytResults = [...kept, ...newResults];
+    renderYtResults();
+    st.className = 'sbox show ok';
+    st.textContent = `保留 ${kept.length} 部，新增 ${newResults.length} 部結果`;
+  } catch(e) {
+    st.className = 'sbox show err';
+    st.textContent = '重新整理失敗：' + e.message;
+  }
+  btn.disabled = false;
+}
+
 function updateYtBatchBar() {
   const bar = document.getElementById('yt-batch-bar');
   const cnt = document.getElementById('yt-selected-count');
@@ -1097,9 +1195,9 @@ async function analyzeWithRetry(item, msgEl, detailEl, completed, total) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const analyzeRes = await apiFetch('/analyze', {
+      const analyzeRes = await apiFetch(item.source === 'tmdb' ? '/tmdb/analyze' : '/analyze', {
         method: 'POST',
-        body: JSON.stringify({ url: item.url })
+        body: JSON.stringify(item.source === 'tmdb' ? { item } : { url: item.url })
       });
 
       if (analyzeRes.ok) return analyzeRes;
@@ -1160,10 +1258,15 @@ async function ytBatchAnalyze() {
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
         const entry = {
-          ytId: item.ytId,
+          source: item.source || 'youtube',
+          mediaType: item.mediaType || 'movie',
+          tmdbId: item.tmdbId || '',
+          ytId: item.ytId || `tmdb-${item.mediaType || 'movie'}-${item.tmdbId}`,
           url: item.url,
           title: p.title || item.title,
           desc: p.desc || '',
+          poster: item.poster || item.thumb || '',
+          thumb: item.thumb || item.poster || '',
           scenesMain: sm, scenesSub: ss,
           scenes: [...sm, ...ss],
           genres: p.genres || [],
