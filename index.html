@@ -222,14 +222,29 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <button class="btn btn-accent" onclick="go('add',null)">＋ 新增電影</button>
       </div>
     </div>
+    <div class="btn-row" id="reanalyze-bar" style="margin-bottom:12px;align-items:center">
+      <span id="reanalyze-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace">已選 0 部</span>
+      <button class="btn btn-sm" onclick="reanalyzeSelectVisible()">全選目前列表</button>
+      <button class="btn btn-sm" onclick="reanalyzeSelectNone()">取消全選</button>
+      <button class="btn btn-accent" id="btn-reanalyze-selected" onclick="reanalyzeSelected()" disabled>重新分析已選</button>
+    </div>
+    <div id="reanalyze-progress" style="display:none;margin-bottom:16px;max-width:720px">
+      <div class="sbox show loading" id="reanalyze-status">
+        <span class="spin"></span><span id="reanalyze-msg">準備重新分析...</span>
+      </div>
+      <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:4px;overflow:hidden;margin-top:8px">
+        <div id="reanalyze-bar-fill" style="height:100%;background:var(--accent);border-radius:99px;width:0%;transition:width 0.5s ease"></div>
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace" id="reanalyze-detail"></div>
+    </div>
     <div class="search-row">
       <input class="search-inp" id="list-q" type="text" placeholder="搜尋電影名稱、場景、類型..." oninput="renderList()">
     </div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
-          <th style="width:66px">縮圖</th><th>電影名稱</th>
-          <th>主要場景</th><th>次要場景</th><th>類型／情感</th><th style="width:96px">操作</th>
+          <th style="width:34px">選</th><th style="width:66px">縮圖</th><th>電影名稱</th>
+          <th>主要場景</th><th>次要場景</th><th>類型／情感</th><th style="width:150px">操作</th>
         </tr></thead>
         <tbody id="list-body"></tbody>
       </table>
@@ -480,6 +495,8 @@ let editId = null;
 let pendingImport = null;
 let curYtId = '';
 let serverOnline = false;
+let reanalyzeSelectedIds = new Set();
+let reanalyzeRunning = false;
 
 // ── API 呼叫 ──────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
@@ -574,11 +591,16 @@ function renderList() {
 
   const body = document.getElementById('list-body');
   const empty = document.getElementById('list-empty');
-  if (!rows.length) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+  if (!rows.length) { body.innerHTML = ''; empty.style.display = 'block'; updateReanalyzeBar(); return; }
   empty.style.display = 'none';
 
   body.innerHTML = rows.map(m => `
     <tr>
+      <td>
+        <input type="checkbox" ${reanalyzeSelectedIds.has(m.id) ? 'checked' : ''}
+          onchange="reanalyzeToggle('${m.id}', this.checked)"
+          style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
+      </td>
       <td>
         <img class="thumb" src="${m.poster || m.thumb || `https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg`}"
           onclick="playVideo('${m.ytId}','${esc(m.title)}')"
@@ -599,19 +621,162 @@ function renderList() {
         ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
       </div></td>
       <td><div class="td-acts">
+        <button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
         <button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
         <button class="btn btn-sm btn-danger" onclick="del('${m.id}','${esc(m.title)}')">刪</button>
       </div></td>
     </tr>`).join('');
+  updateReanalyzeBar();
 }
 
 async function del(id, title) {
   if (!confirm(`確定刪除「${title}」？`)) return;
   try {
     await apiFetch('/db/'+id, { method: 'DELETE' });
+    reanalyzeSelectedIds.delete(id);
     await loadDb();
     toast('已刪除：'+title);
   } catch(e) { toast('刪除失敗','err'); }
+}
+
+function currentListRows() {
+  const q = document.getElementById('list-q').value.trim().toLowerCase();
+  return q ? db.filter(m =>
+    [m.title, m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
+  ) : [...db];
+}
+
+function updateReanalyzeBar() {
+  const cnt = document.getElementById('reanalyze-selected-count');
+  const btn = document.getElementById('btn-reanalyze-selected');
+  if (!cnt || !btn) return;
+  const n = reanalyzeSelectedIds.size;
+  cnt.textContent = `已選 ${n} 部`;
+  btn.disabled = n === 0 || reanalyzeRunning;
+}
+
+function reanalyzeToggle(id, checked) {
+  if (checked) reanalyzeSelectedIds.add(id);
+  else reanalyzeSelectedIds.delete(id);
+  updateReanalyzeBar();
+}
+
+function reanalyzeSelectVisible() {
+  currentListRows().forEach(m => reanalyzeSelectedIds.add(m.id));
+  renderList();
+}
+
+function reanalyzeSelectNone() {
+  reanalyzeSelectedIds.clear();
+  renderList();
+}
+
+async function reanalyzeOne(id) {
+  const m = db.find(x => x.id === id);
+  if (!m) return;
+  await runReanalyzeQueue([m]);
+}
+
+async function reanalyzeSelected() {
+  const selected = db.filter(m => reanalyzeSelectedIds.has(m.id));
+  if (!selected.length) return;
+  const confirmed = confirm(`確定要重新分析 ${selected.length} 部電影？\n會依序排隊處理，完成後覆蓋原本的標籤與簡介。`);
+  if (!confirmed) return;
+  await runReanalyzeQueue(selected);
+}
+
+function reanalyzeItemPayload(m) {
+  const url = (m.url || (m.ytId ? `https://www.youtube.com/watch?v=${m.ytId}` : '')).trim();
+  return {
+    source: m.source || (m.tmdbId ? 'tmdb' : 'youtube'),
+    mediaType: m.mediaType || 'movie',
+    tmdbId: m.tmdbId || '',
+    ytId: m.ytId || '',
+    url,
+    title: m.title || '',
+    desc: m.desc || '',
+    poster: m.poster || m.thumb || '',
+    thumb: m.thumb || m.poster || '',
+    tmdbGenres: m.tmdbGenres || m.genres || [],
+    publishedAt: m.publishedAt || ''
+  };
+}
+
+async function runReanalyzeQueue(items) {
+  if (reanalyzeRunning) return;
+  reanalyzeRunning = true;
+  updateReanalyzeBar();
+
+  const progress = document.getElementById('reanalyze-progress');
+  const statusEl = document.getElementById('reanalyze-status');
+  const msgEl = document.getElementById('reanalyze-msg');
+  const detailEl = document.getElementById('reanalyze-detail');
+  const barFill = document.getElementById('reanalyze-bar-fill');
+  progress.style.display = 'block';
+  statusEl.className = 'sbox show loading';
+  barFill.style.width = '0%';
+
+  let completed = 0;
+  let successCount = 0;
+  const total = items.length;
+
+  for (const m of items) {
+    const item = reanalyzeItemPayload(m);
+    msgEl.textContent = `重新分析中 (${completed + 1}/${total})：${(m.title || '').slice(0, 28)}...`;
+    detailEl.textContent = `排隊處理中，已完成 ${completed}／${total}`;
+    barFill.style.width = (completed / total * 100) + '%';
+
+    if (!item.url) {
+      detailEl.textContent = `略過「${m.title}」：沒有可分析的影片網址`;
+      completed++;
+      continue;
+    }
+
+    try {
+      const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, completed, total);
+      if (analyzeRes.ok) {
+        const p = analyzeRes.data || {};
+        const sm = p.scenes_main || [];
+        const ss = p.scenes_sub || [];
+        const updated = {
+          ...m,
+          id: m.id,
+          source: item.source,
+          mediaType: item.mediaType,
+          tmdbId: item.tmdbId,
+          ytId: item.ytId,
+          url: item.url,
+          title: m.title,
+          desc: p.desc || m.desc || '',
+          poster: item.poster,
+          thumb: item.thumb,
+          scenesMain: sm,
+          scenesSub: ss,
+          scenes: [...sm, ...ss],
+          genres: p.genres || [],
+          moods: p.moods || []
+        };
+        await apiFetch('/db', { method: 'POST', body: JSON.stringify(updated) });
+        reanalyzeSelectedIds.delete(m.id);
+        successCount++;
+      } else {
+        detailEl.textContent = `「${m.title}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
+      }
+    } catch(e) {
+      detailEl.textContent = `「${m.title}」連線錯誤：${e.message || e}，繼續下一部...`;
+    }
+
+    completed++;
+    if (completed < total) await sleep(8000);
+  }
+
+  barFill.style.width = '100%';
+  statusEl.className = 'sbox show ok';
+  msgEl.textContent = `完成，成功重新分析 ${successCount}／${total} 部電影`;
+  detailEl.textContent = '';
+  reanalyzeRunning = false;
+  updateReanalyzeBar();
+  await loadDb();
 }
 
 // ── ADD ───────────────────────────────────────────────────────────
