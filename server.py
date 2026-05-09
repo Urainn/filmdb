@@ -334,6 +334,25 @@ def uid():
 
 
 
+def clean_movie_title(title):
+    title = (title or "").strip()
+    if not title:
+        return ""
+
+    bracket_matches = re.findall(r"[\u3010\[]([^\u3010\u3011\[\]]*[\u3400-\u9fff][^\u3010\u3011\[\]]*)[\u3011\]]", title)
+    if bracket_matches:
+        picked = bracket_matches[-1]
+        picked = re.sub(r"(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u7247\u6bb5|clip|trailer)", "", picked, flags=re.I)
+        picked = re.sub(r"[|\uff5c:\uff1a\-_\u2013\u2014]+", " ", picked)
+        return picked.strip()
+
+    cleaned = re.sub(r"\s*(?:Official\s*)?(?:Trailer|Clip|Teaser)\s*(?:\(\d{4}\))?", "", title, flags=re.I)
+    cleaned = re.sub(r"\s*(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)\s*$", "", cleaned)
+    cleaned = re.sub(r"[|\uff5c].*$", "", cleaned)
+    return cleaned.strip()
+
+
+
 def extract_json(text):
     text = text.strip()
     text = re.sub(r"^```json\s*", "", text)
@@ -973,7 +992,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": uid(),
                     "ytId": yt_id,
                     "url": yt_url,
-                    "title": url_info.get("title", "") or p.get("title", ""),
+                    "title": clean_movie_title(url_info.get("title", "")) or url_info.get("title", "") or p.get("title", ""),
                     "desc": p.get("desc", ""),
                     "scenesMain": sm,
                     "scenesSub": ss,
@@ -1028,6 +1047,34 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
