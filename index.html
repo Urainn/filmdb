@@ -1441,13 +1441,15 @@ async function tmdbAutoImport() {
 
   let page = tmdbNextPage || 1;
   let completed = 0;
+  let processedCount = 0;
   let successCount = 0;
+  let failCount = 0;
   const seen = new Set(ytResults.map(v => v.ytId));
 
   try {
     while (successCount < target && page) {
-      msgEl.textContent = `抓取 TMDB 清單中：${successCount}/${target}`;
-      detailEl.textContent = `正在尋找未在資料庫且有中文片名的作品，第 ${page} 頁`;
+      msgEl.textContent = `抓取 TMDB 清單中：已成功 ${successCount}/${target}`;
+      detailEl.textContent = `正在尋找未在資料庫且有中文片名的作品，第 ${page} 頁，已處理 ${processedCount} 部`;
 
       const filled = await fetchTmdbFilled(q, Math.min(20, target - successCount), page, [...seen]);
       page = filled.nextPage || null;
@@ -1459,9 +1461,10 @@ async function tmdbAutoImport() {
       for (const item of filled.data) {
         if (successCount >= target) break;
         seen.add(item.ytId);
-        msgEl.textContent = `自動分析匯入 (${successCount + 1}/${target})：${item.title.slice(0, 28)}...`;
-        detailEl.textContent = `已成功 ${successCount} 部，正在排隊處理`;
-        barFill.style.width = (successCount / target * 100) + '%';
+        processedCount++;
+        msgEl.textContent = `自動分析匯入，處理第 ${processedCount} 部：${item.title.slice(0, 28)}...`;
+        detailEl.textContent = `目標 ${target} 部，已成功 ${successCount} 部，失敗/略過 ${failCount} 部`;
+        barFill.style.width = (Math.min(successCount, target) / target * 100) + '%';
 
         try {
           const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, completed, target);
@@ -1490,9 +1493,11 @@ async function tmdbAutoImport() {
             successCount++;
             ytResults = ytResults.filter(v => v.ytId !== item.ytId);
           } else {
+            failCount++;
             detailEl.textContent = `「${item.title}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
           }
         } catch(e) {
+          failCount++;
           detailEl.textContent = `「${item.title}」失敗：${e.message || e}，繼續下一部...`;
         }
 
@@ -1505,7 +1510,7 @@ async function tmdbAutoImport() {
     barFill.style.width = '100%';
     statusEl.className = 'sbox show ok';
     msgEl.textContent = `完成，成功自動匯入 ${successCount}/${target} 部 TMDB 作品`;
-    detailEl.textContent = successCount < target ? '沒有更多符合條件的作品，或剩餘作品都已在資料庫。' : '';
+    detailEl.textContent = successCount < target ? `已處理 ${processedCount} 部，失敗/略過 ${failCount} 部。沒有更多符合條件的作品，或剩餘作品都已在資料庫。` : `已處理 ${processedCount} 部，失敗/略過 ${failCount} 部。`;
     renderYtResults();
     if (successCount > 0) await loadDb();
   } catch(e) {
