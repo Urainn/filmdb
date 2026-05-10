@@ -359,6 +359,11 @@ def clean_movie_title(title):
 
 
 
+def has_chinese_text(value):
+    return bool(re.search(r"[\u3400-\u9fff]", value or ""))
+
+
+
 def extract_json(text):
     text = text.strip()
     text = re.sub(r"^```json\s*", "", text)
@@ -958,11 +963,15 @@ class Handler(BaseHTTPRequestHandler):
             }
             genre_map = tmdb_genres(media_type)
             results = []
-            for item in data.get("results", [])[:max_results]:
+            for item in data.get("results", []):
                 result = tmdb_to_result(item, media_type, genre_map, existing_ids)
+                if not has_chinese_text(result.get("title", "")):
+                    continue
                 key = f"tmdb-{media_type}-{result['tmdbId']}"
                 if key not in exclude_ids and not result["inDb"]:
                     results.append(result)
+                if len(results) >= max_results:
+                    break
 
 
             self.send_json(200, {
@@ -1062,8 +1071,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 
