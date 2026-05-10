@@ -368,6 +368,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <option value="50">50 筆</option>
       </select>
       <button class="btn btn-accent" onclick="ytSearch()" id="btn-yt-search">🔍 搜尋</button>
+      <button class="btn" onclick="tmdbAutoImport()" id="btn-tmdb-auto" style="display:none">✦ TMDB 自動匯入</button>
     </div>
 
     <!-- 搜尋提示 -->
@@ -1139,8 +1140,10 @@ function onSearchSourceChange() {
   const mediaType = document.getElementById('media-type');
   const year = document.getElementById('tmdb-year');
   const q = document.getElementById('yt-search-q');
+  const autoBtn = document.getElementById('btn-tmdb-auto');
   if (mediaType) mediaType.style.display = isTmdb ? 'block' : 'none';
   if (year) year.style.display = isTmdb ? 'block' : 'none';
+  if (autoBtn) autoBtn.style.display = isTmdb ? 'inline-flex' : 'none';
   if (q) q.placeholder = isTmdb ? '搜尋 TMDB，例如：沙丘、Moving、2024 熱門影劇' : '輸入中文關鍵字，例如：2024 台灣電影預告、2025 華語電影預告片...';
   ytResults = [];
   ytSelected.clear();
@@ -1233,7 +1236,9 @@ async function ytSearch() {
     st.textContent = '搜尋失敗：' + e.message;
   }
   document.getElementById('btn-yt-search').disabled = false;
-}function renderYtResults() {
+}
+
+function renderYtResults() {
   const grid = document.getElementById('yt-results-grid');
   if (!ytResults.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:12px">沒有搜尋結果</div>'; return; }
 
@@ -1398,7 +1403,123 @@ async function ytRefresh() {
     st.textContent = '重新整理失敗：' + e.message;
   }
   btn.disabled = false;
-}function updateYtBatchBar() {
+}
+
+async function tmdbAutoImport() {
+  if (getSearchSource() !== 'tmdb') {
+    toast('請先切換到 TMDB', 'err');
+    return;
+  }
+
+  const q = document.getElementById('yt-search-q').value.trim();
+  const year = document.getElementById('tmdb-year')?.value.trim() || '';
+  if (!q && !year) {
+    toast('請輸入年份或關鍵字', 'err');
+    return;
+  }
+
+  const rawCount = prompt('要自動分析匯入幾部？建議 20-50，最多 100。', '50');
+  if (rawCount === null) return;
+  const target = Math.min(Math.max(parseInt(rawCount, 10) || 0, 1), 100);
+  if (!target) return;
+
+  const label = `${year ? year + ' ' : ''}${getMediaType() === 'tv' ? '影集' : '電影'}${q ? ' / ' + q : ''}`;
+  const confirmed = confirm(`確定自動匯入 ${target} 部 TMDB 作品？\n條件：${label}\n會排除已經在資料庫的作品，並一部一部排隊分析。`);
+  if (!confirmed) return;
+
+  document.getElementById('btn-tmdb-auto').disabled = true;
+  document.getElementById('btn-yt-search').disabled = true;
+  document.getElementById('btn-yt-refresh').disabled = true;
+  document.getElementById('yt-batch-progress').style.display = 'block';
+
+  const msgEl = document.getElementById('yt-batch-msg');
+  const detailEl = document.getElementById('yt-batch-detail');
+  const barFill = document.getElementById('yt-batch-bar-fill');
+  const statusEl = document.getElementById('yt-batch-status');
+  statusEl.className = 'sbox show loading';
+  barFill.style.width = '0%';
+
+  let page = tmdbNextPage || 1;
+  let completed = 0;
+  let successCount = 0;
+  const seen = new Set(ytResults.map(v => v.ytId));
+
+  try {
+    while (successCount < target && page) {
+      msgEl.textContent = `抓取 TMDB 清單中：${successCount}/${target}`;
+      detailEl.textContent = `正在尋找未在資料庫且有中文片名的作品，第 ${page} 頁`;
+
+      const filled = await fetchTmdbFilled(q, Math.min(20, target - successCount), page, [...seen]);
+      page = filled.nextPage || null;
+      if (!filled.data.length) {
+        if (!page) break;
+        continue;
+      }
+
+      for (const item of filled.data) {
+        if (successCount >= target) break;
+        seen.add(item.ytId);
+        msgEl.textContent = `自動分析匯入 (${successCount + 1}/${target})：${item.title.slice(0, 28)}...`;
+        detailEl.textContent = `已成功 ${successCount} 部，正在排隊處理`;
+        barFill.style.width = (successCount / target * 100) + '%';
+
+        try {
+          const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, completed, target);
+          if (analyzeRes.ok) {
+            const p = analyzeRes.data || {};
+            const sm = p.scenes_main || [];
+            const ss = p.scenes_sub || [];
+            const entry = {
+              source: 'tmdb',
+              mediaType: item.mediaType || getMediaType(),
+              tmdbId: item.tmdbId || '',
+              ytId: item.ytId || `tmdb-${item.mediaType || getMediaType()}-${item.tmdbId}`,
+              url: item.url,
+              title: item.title || p.title,
+              desc: p.desc || item.desc || '',
+              poster: item.poster || item.thumb || '',
+              thumb: item.thumb || item.poster || '',
+              scenesMain: sm,
+              scenesSub: ss,
+              scenes: [...sm, ...ss],
+              genres: p.genres || item.tmdbGenres || [],
+              moods: p.moods || []
+            };
+            const saveRes = await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
+            if (!saveRes.ok) throw new Error(saveRes.error || '儲存失敗');
+            successCount++;
+            ytResults = ytResults.filter(v => v.ytId !== item.ytId);
+          } else {
+            detailEl.textContent = `「${item.title}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
+          }
+        } catch(e) {
+          detailEl.textContent = `「${item.title}」失敗：${e.message || e}，繼續下一部...`;
+        }
+
+        completed++;
+        if (successCount < target) await sleep(8000);
+      }
+    }
+
+    tmdbNextPage = page;
+    barFill.style.width = '100%';
+    statusEl.className = 'sbox show ok';
+    msgEl.textContent = `完成，成功自動匯入 ${successCount}/${target} 部 TMDB 作品`;
+    detailEl.textContent = successCount < target ? '沒有更多符合條件的作品，或剩餘作品都已在資料庫。' : '';
+    renderYtResults();
+    if (successCount > 0) await loadDb();
+  } catch(e) {
+    statusEl.className = 'sbox show err';
+    msgEl.textContent = 'TMDB 自動匯入失敗';
+    detailEl.textContent = e.message || String(e);
+  }
+
+  document.getElementById('btn-tmdb-auto').disabled = false;
+  document.getElementById('btn-yt-search').disabled = false;
+  document.getElementById('btn-yt-refresh').disabled = false;
+}
+
+function updateYtBatchBar() {
   const bar = document.getElementById('yt-batch-bar');
   const cnt = document.getElementById('yt-selected-count');
   const btn = document.getElementById('btn-batch-analyze');
