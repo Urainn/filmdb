@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -357,7 +357,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <option value="movie">電影</option>
         <option value="tv">影劇</option>
       </select>
-      <input class="search-inp" id="tmdb-year" type="text" inputmode="numeric" maxlength="4" placeholder="年份" style="display:none;max-width:90px">
+      <input class="search-inp" id="tmdb-year" type="text" inputmode="numeric" maxlength="4" placeholder="年份" style="display:none;max-width:90px" onkeydown="if(event.key==='Enter' )ytSearch()" oninput="if(getSearchSource()==='tmdb' && this.value.trim().length===4) ytSearch()">
       <input class="search-inp" id="yt-search-q" type="text"
         placeholder="輸入中文關鍵字，例如：2024 台灣電影預告、2025 華語電影預告片..."
         onkeydown="if(event.key==='Enter')ytSearch()">
@@ -1150,10 +1150,49 @@ function onSearchSourceChange() {
   updateYtBatchBar();
 }
 
+async function fetchTmdbFilled(query, maxResults, startPage, excludeIds = []) {
+  let nextPage = startPage || 1;
+  let results = [];
+  const seen = new Set(excludeIds);
+  let attempts = 0;
+
+  while (results.length < maxResults && nextPage && attempts < 8) {
+    const r = await apiFetch('/tmdb/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        query,
+        max_results: maxResults,
+        exclude_ids: [...seen],
+        media_type: getMediaType(),
+        year: document.getElementById('tmdb-year')?.value.trim() || '',
+        page: nextPage
+      })
+    });
+    if (!r.ok) throw new Error(r.error);
+
+    for (const item of (r.data || [])) {
+      if (!seen.has(item.ytId) && !item.inDb) {
+        seen.add(item.ytId);
+        results.push(item);
+        if (results.length >= maxResults) break;
+      }
+    }
+    nextPage = r.nextPage || null;
+    attempts++;
+  }
+
+  return { data: results, nextPage };
+}
+
 async function ytSearch() {
   const q = document.getElementById('yt-search-q').value.trim();
-  if (!q) { toast('請輸入搜尋關鍵字', 'err'); return; }
-  const maxResults = document.getElementById('yt-search-count').value;
+  const isTmdb = getSearchSource() === 'tmdb';
+  const year = document.getElementById('tmdb-year')?.value.trim() || '';
+  if (!q && !(isTmdb && year)) {
+    toast(isTmdb ? '請輸入關鍵字或年份' : '請輸入搜尋關鍵字', 'err');
+    return;
+  }
+  const maxResults = parseInt(document.getElementById('yt-search-count').value, 10);
 
   const st = document.getElementById('yt-search-status');
   st.className = 'sbox show loading';
@@ -1167,37 +1206,34 @@ async function ytSearch() {
   tmdbNextPage = 1;
 
   try {
-    const isTmdb = getSearchSource() === 'tmdb';
-    const r = await apiFetch(isTmdb ? '/tmdb/search' : '/youtube/search', {
-      method: 'POST',
-      body: JSON.stringify(isTmdb ? {
-        query: q,
-        max_results: parseInt(maxResults),
-        media_type: getMediaType(),
-        year: document.getElementById('tmdb-year')?.value.trim() || '',
-        page: 1
-      } : {
-        query: q,
-        max_results: parseInt(maxResults)
-      })
-    });
-    if (!r.ok) throw new Error(r.error);
-    ytResults = r.data;
-    ytNextPageToken = r.nextPageToken || '';
-    tmdbNextPage = r.nextPage || null;
+    if (isTmdb) {
+      const filled = await fetchTmdbFilled(q, maxResults, 1, []);
+      ytResults = filled.data;
+      ytNextPageToken = '';
+      tmdbNextPage = filled.nextPage || null;
+    } else {
+      const r = await apiFetch('/youtube/search', {
+        method: 'POST',
+        body: JSON.stringify({ query: q, max_results: maxResults })
+      });
+      if (!r.ok) throw new Error(r.error);
+      ytResults = r.data;
+      ytNextPageToken = r.nextPageToken || '';
+      tmdbNextPage = null;
+    }
+
     renderYtResults();
     document.getElementById('yt-filter-bar').style.display = 'flex';
-    const inDbCount = ytResults.filter(v => v.inDb).length;
     st.className = 'sbox show ok';
-    st.textContent = `✓ 找到 ${ytResults.length} 筆結果${inDbCount > 0 ? `（${inDbCount} 部已在庫）` : ''}，點擊卡片選取`;
+    st.textContent = isTmdb
+      ? `找到 ${ytResults.length} 筆未在資料庫的結果${year ? `（${year}）` : ''}`
+      : `找到 ${ytResults.length} 筆結果，點擊卡片選取`;
   } catch(e) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 搜尋失敗：' + e.message;
+    st.textContent = '搜尋失敗：' + e.message;
   }
   document.getElementById('btn-yt-search').disabled = false;
-}
-
-function renderYtResults() {
+}function renderYtResults() {
   const grid = document.getElementById('yt-results-grid');
   if (!ytResults.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:12px">沒有搜尋結果</div>'; return; }
 
@@ -1310,14 +1346,18 @@ async function ytRefresh() {
 
 async function ytRefresh() {
   const q = document.getElementById('yt-search-q').value.trim();
-  if (!q) { toast('請先輸入搜尋關鍵字', 'err'); return; }
   const isTmdb = getSearchSource() === 'tmdb';
+  const year = document.getElementById('tmdb-year')?.value.trim() || '';
+  if (!q && !(isTmdb && year)) {
+    toast(isTmdb ? '請輸入關鍵字或年份' : '請先輸入搜尋關鍵字', 'err');
+    return;
+  }
   if ((!isTmdb && !ytNextPageToken) || (isTmdb && !tmdbNextPage)) {
     toast('已經沒有更多搜尋結果可載入', 'err');
     return;
   }
 
-  const maxResults = document.getElementById('yt-search-count').value;
+  const maxResults = parseInt(document.getElementById('yt-search-count').value, 10);
   const btn = document.getElementById('btn-yt-refresh');
   btn.disabled = true;
 
@@ -1328,39 +1368,37 @@ async function ytRefresh() {
   st.innerHTML = `<span class="spin"></span> 重新整理中，保留 ${kept.length} 部已勾選作品...`;
 
   try {
-    const r = await apiFetch(isTmdb ? '/tmdb/search' : '/youtube/search', {
-      method: 'POST',
-      body: JSON.stringify(isTmdb ? {
-        query: q,
-        max_results: parseInt(maxResults),
-        exclude_ids: [...keptIds],
-        media_type: getMediaType(),
-        year: document.getElementById('tmdb-year')?.value.trim() || '',
-        page: tmdbNextPage
-      } : {
-        query: q,
-        max_results: parseInt(maxResults),
-        exclude_ids: [...keptIds],
-        page_token: ytNextPageToken
-      })
-    });
-    if (!r.ok) throw new Error(r.error);
-    ytNextPageToken = r.nextPageToken || '';
-    tmdbNextPage = r.nextPage || null;
+    if (isTmdb) {
+      const filled = await fetchTmdbFilled(q, maxResults, tmdbNextPage, [...keptIds]);
+      tmdbNextPage = filled.nextPage || null;
+      ytResults = [...kept, ...ytResults.filter(v => !ytSelected.has(v.ytId)), ...filled.data];
+      st.className = 'sbox show ok';
+      st.textContent = `保留 ${kept.length} 部，新增 ${filled.data.length} 部未在資料庫的結果`;
+    } else {
+      const r = await apiFetch('/youtube/search', {
+        method: 'POST',
+        body: JSON.stringify({
+          query: q,
+          max_results: maxResults,
+          exclude_ids: [...keptIds],
+          page_token: ytNextPageToken
+        })
+      });
+      if (!r.ok) throw new Error(r.error);
+      ytNextPageToken = r.nextPageToken || '';
+      const newResults = r.data.filter(v => !keptIds.has(v.ytId));
+      ytResults = [...kept, ...newResults];
+      st.className = 'sbox show ok';
+      st.textContent = `已保留 ${kept.length} 部勾選影片，新增 ${newResults.length} 部新結果`;
+    }
 
-    const newResults = r.data.filter(v => !keptIds.has(v.ytId));
-    ytResults = [...kept, ...newResults];
     renderYtResults();
-    st.className = 'sbox show ok';
-    st.textContent = `保留 ${kept.length} 部，新增 ${newResults.length} 部結果`;
   } catch(e) {
     st.className = 'sbox show err';
     st.textContent = '重新整理失敗：' + e.message;
   }
   btn.disabled = false;
-}
-
-function updateYtBatchBar() {
+}function updateYtBatchBar() {
   const bar = document.getElementById('yt-batch-bar');
   const cnt = document.getElementById('yt-selected-count');
   const btn = document.getElementById('btn-batch-analyze');
