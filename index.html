@@ -445,6 +445,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
           取得免費 Key：<a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--blue)">aistudio.google.com/apikey</a>
         </div>
         <div class="field">
+          <label class="fl">追加單筆 Gemini API Key</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input class="fi" id="key-add-input" type="text" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1;min-width:260px">
+            <button class="btn btn-accent" onclick="addKey()">新增 Key</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:3px">這裡會追加到現有清單，不會取代舊 Key</div>
+        </div>
+        <div class="field">
           <label class="fl">Gemini API Keys（每行一組）</label>
           <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AIzaYYYYYYYYYYYYYYYYYYYYYYY&#10;AIzaZZZZZZZZZZZZZZZZZZZZZZZ"></textarea>
           <div style="font-size:10.5px;color:var(--text3);margin-top:3px">儲存後舊的 Key 會被取代，請確認每行都是完整的 Key</div>
@@ -1713,6 +1721,35 @@ async function loadKeyStatus() {
     }
   } catch(e) {
     el.textContent = '無法取得狀態';
+  }
+}
+
+async function addKey() {
+  const inp = document.getElementById('key-add-input');
+  const st = document.getElementById('keys-save-status');
+  const key = (inp?.value || '').trim();
+  if (!key.startsWith('AIza')) {
+    st.className = 'sbox show err';
+    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
+    return;
+  }
+
+  st.className = 'sbox show loading';
+  st.innerHTML = '<span class="spin"></span> 新增中...';
+
+  try {
+    const r = await apiFetch('/config/keys/add', {
+      method: 'POST',
+      body: JSON.stringify({ key })
+    });
+    if (!r.ok) throw new Error(r.error || '新增失敗');
+    st.className = 'sbox show ok';
+    st.textContent = r.added ? `✓ 已新增 1 組 Key，目前共 ${r.count} 組` : `✓ 這組 Key 已存在，目前共 ${r.count} 組`;
+    inp.value = '';
+    loadKeyStatus();
+  } catch(e) {
+    st.className = 'sbox show err';
+    st.textContent = '✗ 新增失敗：' + e.message;
   }
 }
 
