@@ -1130,11 +1130,19 @@ function cleanMovieTitle(title) {
   title = (title || '').trim();
   if (!title) return '';
 
+  const bookTitleRe = /[\u300a]([^\u300a\u300b]*[\u3400-\u9fff][^\u300a\u300b]*)[\u300b]/g;
+  const bookTitleMatches = [...title.matchAll(bookTitleRe)];
+  if (bookTitleMatches.length) {
+    return bookTitleMatches[bookTitleMatches.length - 1][1]
+      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)/ig, '')
+      .trim();
+  }
+
   const bracketRe = /[\u3010\[]([^\u3010\u3011\[\]]*[\u3400-\u9fff][^\u3010\u3011\[\]]*)[\u3011\]]/g;
   const bracketMatches = [...title.matchAll(bracketRe)];
   if (bracketMatches.length) {
     return bracketMatches[bracketMatches.length - 1][1]
-      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u7247\u6bb5|clip|trailer)/ig, '')
+      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)/ig, '')
       .replace(/[|\uff5c:\uff1a\-_\u2013\u2014]+/g, ' ')
       .trim();
   }
@@ -1142,7 +1150,6 @@ function cleanMovieTitle(title) {
   return title
     .replace(/\s*(?:Official\s*)?(?:Trailer|Clip|Teaser)\s*(?:\(\d{4}\))?/ig, '')
     .replace(/\s*(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)\s*$/g, '')
-    .replace(/[|\uff5c].*$/g, '')
     .trim();
 }
 
