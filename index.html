@@ -704,6 +704,20 @@ function reanalyzeItemPayload(m) {
   };
 }
 
+async function lookupYoutubeCleanTitle(item) {
+  if (!item.ytId || String(item.ytId).startsWith('tmdb-')) return '';
+  try {
+    const info = await apiFetch('/youtube/info', {
+      method: 'POST',
+      body: JSON.stringify({ ytId: item.ytId, url: item.url })
+    });
+    if (info.ok) return info.cleanTitle || cleanMovieTitle(info.title) || info.title || '';
+  } catch(e) {
+    // Keep the existing title if lookup fails.
+  }
+  return '';
+}
+
 async function runReanalyzeQueue(items) {
   if (reanalyzeRunning) return;
   reanalyzeRunning = true;
@@ -740,6 +754,7 @@ async function runReanalyzeQueue(items) {
         const p = analyzeRes.data || {};
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
+        const cleanTitle = item.source === 'tmdb' ? (item.title || '') : await lookupYoutubeCleanTitle(item);
         const updated = {
           ...m,
           id: m.id,
@@ -748,7 +763,7 @@ async function runReanalyzeQueue(items) {
           tmdbId: item.tmdbId,
           ytId: item.ytId,
           url: item.url,
-          title: m.title,
+          title: cleanTitle || m.title,
           desc: p.desc || m.desc || '',
           poster: item.poster,
           thumb: item.thumb,
