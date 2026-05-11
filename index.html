@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -495,6 +495,7 @@ let db = [];
 let editId = null;
 let pendingImport = null;
 let curYtId = '';
+let curVideoTitle = '';
 let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
 let reanalyzeRunning = false;
@@ -783,6 +784,7 @@ async function runReanalyzeQueue(items) {
 // ── ADD ───────────────────────────────────────────────────────────
 function resetAdd() {
   curYtId = '';
+  curVideoTitle = '';
   document.getElementById('f-url').value = '';
   document.getElementById('yt-tag').innerHTML = '';
   document.getElementById('btn-analyze').disabled = true;
@@ -794,12 +796,27 @@ function resetAdd() {
   });
 }
 
-function onUrl() {
+async function onUrl() {
   const url = document.getElementById('f-url').value.trim();
   const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
   curYtId = m ? m[1] : '';
+  curVideoTitle = '';
   document.getElementById('yt-tag').innerHTML = curYtId ? `<div class="yt-tag">▶ ID: ${curYtId}</div>` : '';
   document.getElementById('btn-analyze').disabled = !curYtId;
+  if (!curYtId) return;
+
+  try {
+    const info = await apiFetch('/youtube/info', {
+      method: 'POST',
+      body: JSON.stringify({ ytId: curYtId, url })
+    });
+    if (info.ok) {
+      curVideoTitle = info.cleanTitle || cleanMovieTitle(info.title) || info.title || '';
+      document.getElementById('yt-tag').innerHTML = `<div class="yt-tag">▶ ID: ${curYtId}${curVideoTitle ? ` · ${curVideoTitle}` : ''}</div>`;
+    }
+  } catch(e) {
+    // Title lookup is helpful but not required for analysis.
+  }
 }
 
 const ANALYZE_MSGS = [
@@ -920,7 +937,7 @@ async function analyze() {
   // 如果是覆蓋，帶入舊資料的 id
   if (duplicate) p._overwriteId = duplicate.id;
 
-  document.getElementById('f-title').value = p.title || '';
+  document.getElementById('f-title').value = curVideoTitle || p.title || '';
   document.getElementById('f-desc').value = p.desc || '';
   document.getElementById('f-scenes-main').value = join(p.scenes_main);
   document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
