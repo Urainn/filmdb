@@ -345,16 +345,21 @@ def clean_movie_title(title):
     if not title:
         return ""
 
+    book_title_matches = re.findall(r"[\u300a]([^\u300a\u300b]*[\u3400-\u9fff][^\u300a\u300b]*)[\u300b]", title)
+    if book_title_matches:
+        picked = book_title_matches[-1]
+        picked = re.sub(r"(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)", "", picked, flags=re.I)
+        return picked.strip()
+
     bracket_matches = re.findall(r"[\u3010\[]([^\u3010\u3011\[\]]*[\u3400-\u9fff][^\u3010\u3011\[\]]*)[\u3011\]]", title)
     if bracket_matches:
         picked = bracket_matches[-1]
-        picked = re.sub(r"(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u7247\u6bb5|clip|trailer)", "", picked, flags=re.I)
+        picked = re.sub(r"(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)", "", picked, flags=re.I)
         picked = re.sub(r"[|\uff5c:\uff1a\-_\u2013\u2014]+", " ", picked)
         return picked.strip()
 
     cleaned = re.sub(r"\s*(?:Official\s*)?(?:Trailer|Clip|Teaser)\s*(?:\(\d{4}\))?", "", title, flags=re.I)
     cleaned = re.sub(r"\s*(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)\s*$", "", cleaned)
-    cleaned = re.sub(r"[|\uff5c].*$", "", cleaned)
     return cleaned.strip()
 
 
@@ -1116,7 +1121,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
