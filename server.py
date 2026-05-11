@@ -800,6 +800,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_save_keys()
         elif path == "/youtube/search":
             self.handle_youtube_search()
+        elif path == "/youtube/info":
+            self.handle_youtube_info()
         elif path == "/tmdb/search":
             self.handle_tmdb_search()
         elif path == "/tmdb/analyze":
@@ -917,6 +919,49 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
             self.send_json(200, {"ok": False, "error": f"YouTube API 錯誤: {err[:200]}"})
+        except Exception as e:
+            self.send_json(200, {"ok": False, "error": str(e)})
+
+
+    def handle_youtube_info(self):
+        body = self.read_body()
+        yt_id = body.get("ytId", "").strip()
+        url = body.get("url", "").strip()
+        if not yt_id and url:
+            m = re.search(r"(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})", url)
+            yt_id = m.group(1) if m else ""
+        if not yt_id:
+            self.send_json(400, {"ok": False, "error": "missing ytId"})
+            return
+
+        params = {
+            "part": "snippet",
+            "id": yt_id,
+            "key": YOUTUBE_API_KEY,
+        }
+        api_url = f"https://www.googleapis.com/youtube/v3/videos?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(api_url, headers={"Accept": "application/json"}, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            items = data.get("items", [])
+            if not items:
+                self.send_json(404, {"ok": False, "error": "video not found"})
+                return
+            snippet = items[0].get("snippet", {})
+            self.send_json(200, {
+                "ok": True,
+                "ytId": yt_id,
+                "title": snippet.get("title", ""),
+                "cleanTitle": clean_movie_title(snippet.get("title", "")),
+                "channel": snippet.get("channelTitle", ""),
+                "publishedAt": snippet.get("publishedAt", "")[:10],
+                "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                "url": f"https://www.youtube.com/watch?v={yt_id}",
+            })
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")
+            self.send_json(200, {"ok": False, "error": f"YouTube API error: {err[:200]}"})
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
@@ -1071,7 +1116,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
