@@ -537,7 +537,7 @@ def call_gemini_analyze(yt_url):
             return {"ok": True, "data": result}
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
-            if e.code == 429:
+            if e.code in (403, 429):
                 current_key = get_next_key(failed_key=current_key)
                 time.sleep(5)
                 continue
@@ -639,7 +639,7 @@ def call_gemini_tmdb(item):
             return {"ok": True, "data": result}
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
-            if e.code == 429:
+            if e.code in (403, 429):
                 current_key = get_next_key(failed_key=current_key)
                 time.sleep(5)
                 continue
@@ -803,6 +803,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_db_add()
         elif path == "/config/keys":
             self.handle_save_keys()
+        elif path == "/config/keys/add":
+            self.handle_add_key()
         elif path == "/youtube/search":
             self.handle_youtube_search()
         elif path == "/youtube/info":
@@ -869,6 +871,40 @@ class Handler(BaseHTTPRequestHandler):
         keys = [k.strip() for k in keys if k.strip()]
         ok = save_gemini_keys(keys)
         self.send_json(200, {"ok": ok, "count": len(keys)} if ok else {"ok": False, "error": "儲存失敗"})
+
+
+    def handle_add_key(self):
+        body = self.read_body()
+        incoming = body.get("keys")
+        if incoming is None:
+            incoming = [body.get("key", "")]
+        if not isinstance(incoming, list):
+            incoming = [str(incoming)]
+
+        new_keys = []
+        for key in incoming:
+            key = str(key).strip()
+            if key.startswith("AIza") and key not in new_keys:
+                new_keys.append(key)
+
+        if not new_keys:
+            self.send_json(400, {"ok": False, "error": "請提供有效的 Gemini API Key"})
+            return
+
+        existing = [k.strip() for k in get_gemini_keys() if k.strip()]
+        combined = existing[:]
+        added = 0
+        for key in new_keys:
+            if key not in combined:
+                combined.append(key)
+                added += 1
+
+        ok = save_gemini_keys(combined)
+        self.send_json(200, {
+            "ok": ok,
+            "added": added,
+            "count": len(combined),
+        } if ok else {"ok": False, "error": "新增失敗"})
 
 
     def handle_youtube_search(self):
@@ -1121,9 +1157,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 
