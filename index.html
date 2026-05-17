@@ -242,36 +242,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
     <div class="tbl-wrap">
       <table>
-        <thead>
-<tr>
-<th style="width:34px">選</th>
-<th style="width:66px">縮圖</th>
-<th>電影名稱</th>
-<th>主要場景</th>
-<th>次要場景</th>
-<th>類型／情感</th>
-<th>演員名單</th>
-<th style="width:150px">操作</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><input type="checkbox"></td>
-<td><img src="${m.img}" style="width:50px;height:auto;"></td>
-<td>${m.name}</td>
-<td>${m.mainScene}</td>
-<td>${m.subScene}</td>
-<td>${m.movieType}</td>
-<td>${m.actorName || ''}</td>
-<td>
-<div class="td-acts" style="text-align:right;">
-<button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
-<button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
-<button class="btn btn-sm btn-danger" onclick="del('${m.id}','${esc(m.title)}')">刪</button>
-</div>
-</td>
-</tr>
-</tbody>
+        <thead><tr>
+          <th style="width:34px">選</th><th style="width:66px">縮圖</th><th>電影名稱</th>
+          <th>主要場景</th><th>次要場景</th><th>類型／情感</th><th>演員名單</th><th style="width:150px">操作</th>
         </tr></thead>
         <tbody id="list-body"></tbody>
       </table>
