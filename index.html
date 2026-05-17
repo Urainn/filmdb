@@ -631,7 +631,7 @@ function renderList() {
         ${(m.genres||[]).map(t=>`<span class="chip gn">${t}</span>`).join('')}
         ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
       </div></td>
-      <td><div class="td-acts">
+      <td><<div class="td-acts" style="text-align:right;">>
         <button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
         <button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
         <button class="btn btn-sm btn-danger" onclick="del('${m.id}','${esc(m.title)}')">刪</button>
