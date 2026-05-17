@@ -657,8 +657,6 @@ function renderList() {
         ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
       </div></td>
       <td><div class="td-actors">
-      <!-- 演員名單內容，會自動換行顯示 -->
-      演員A、演員B、演員C<br>
       </div></td>
       <td><div class="td-acts" style="text-align:right;">
         <button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
