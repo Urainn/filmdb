@@ -496,24 +496,23 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 
 <div id="toast"></div>
 
-<!-- 編輯演員名單 彈窗 -->
-<div class="modal fade" id="editActorModal" tabindex="-1">
+<div class="modal fade" id="editActorModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5>編輯演員名單</h5>
+        <h5 class="modal-title">編輯演員名單</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="edit_id">
         <div class="form-group">
           <label>演員名單</label>
-          <!-- 多個演員用逗號分隔 -->
-          <textarea id="edit_actors" class="form-control" rows="4"></textarea>
-          <small>多個演員請用逗號分隔，例如：張三,李四,王五</small>
+          <textarea id="edit_actors" class="form-control" rows="4" placeholder="請輸入演員，多個以逗號分隔"></textarea>
+          <small class="text-muted">範例：張三,李四,王五</small>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
         <button type="button" class="btn btn-primary" onclick="saveActors()">儲存</button>
       </div>
     </div>
