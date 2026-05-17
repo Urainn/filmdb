@@ -431,7 +431,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="page-head">
       <div><div class="page-title">API Key 設定</div><div class="page-sub">在這裡新增多組 Gemini Key，額度用完自動切換</div></div>
     </div>
-
+<div class="btn-row" style="margin-top:15px">
+  <button class="btn btn-danger" onclick="batchSyncAllActors()">🚀 一鍵批次同步全庫所有電影演員</button>
+</div>
+<div id="batch-sync-actor-log" style="margin-top:10px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:560px;"></div>
     <div style="max-width:560px">
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
         <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">目前 Key 狀態</div>
@@ -1056,28 +1059,66 @@ async function saveEdit() {
   } catch(e) { toast('儲存失敗', 'err'); }
 }
 
-// ── TMDB 同步演員 ────────────────────────────────────────────────
+// ── TMDB 單部同步演員（自動存庫） ────────────────────────────────────────────────
 async function syncActorsFromTMDB() {
-  if (!editId || !TMDB_API_KEY) return;
+  if (!editId || !f8abc776cee1400e1fadf2874e1d8c2c) {
+    alert("請先設定 TMDB_API_KEY！");
+    return;
+  }
   const movie = db.find(m => m.id == editId);
+  if (!movie) return;
+
   try {
     const searchRes = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURI(movie.title)}&api_key=${TMDB_API_KEY}&language=zh-TW`);
     const searchData = await searchRes.json();
-    if (!searchData.results?.length) { alert('找不到電影'); return; }
-
+    if (!searchData.results?.length) {
+      alert("❌ TMDB 找不到該電影");
+      return;
+    }
     const tmdbId = searchData.results[0].id;
     const creditRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/credits?api_key=${TMDB_API_KEY}&language=zh-TW`);
     const creditData = await creditRes.json();
-
-    const actors = creditData.cast.slice(0, 10).map(c => c.name).join('、');
+    const actors = creditData.cast.slice(0, 12).map(c => c.name).join('、');
+    if (!actors) {
+      alert("❌ 無演員資料");
+      return;
+    }
     document.getElementById('e-actors').value = actors;
-    alert('✅ 同步完成：' + actors);
+    movie.actors = actors;
+    await apiFetch('/db', { method: 'POST', body: JSON.stringify(movie) });
+    alert(`✅ 同步成功並自動儲存：\n${actors}`);
+    await loadDb();
   } catch (e) {
-    alert('❌ 同步失敗');
+    alert('❌ 單部同步失敗');
     console.error(e);
   }
 }
 
+let batchSyncRunning = false;
+async function batchSyncAllActors() {
+  if(batchSyncRunning) return toast("正在執行中，請稍後","err");
+  if(!TMDB_API_KEY) return toast("請先填寫 TMDB_API_KEY","err");
+
+  const confirmRun = confirm(`即將自動批量同步【全部 ${db.length} 部電影】TMDB 演員名單
+會自動搜尋匹配、抓取演員、自動存入雲端資料庫
+是否開始執行？`);
+  if(!confirmRun) return;
+
+  batchSyncRunning = true;
+  const logBox = document.getElementById("batch-sync-actor-log");
+  logBox.innerHTML = `<div class="sbox show loading"><span class="spin"></span>開始批次同步演員...</div>`;
+
+  let successNum = 0;
+  let failNum = 0;
+  let skipNum = 0;
+  const total = db.length;
+
+  for(let i=0; i<db.length; i++){
+    const item = db[i];
+    const nowIdx = i+1;
+    logBox.innerHTML += `<div>【${nowIdx}/${total}】處理中：${item.title}</div>`;
+    window.scrollTo(0,document.body.scroll
+  
 // ── VIDEO ─────────────────────────────────────────────────────────
 function playVideo(ytId, title) {
   document.getElementById('vm-title').textContent = title;
