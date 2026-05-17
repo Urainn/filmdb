@@ -509,7 +509,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 <script>
 // ── 伺服器位址 ───────────────────────────────────────────────────
 const API = window.location.origin;
-const TMDB_API_KEY = "你的TMDB_API_KEY";
+const TMDB_API_KEY = "f8abc776cee1400e1fadf2874e1d8c2c";
 // ────────────────────────────────────────────────────────────────
 
 let db = [];
@@ -1061,7 +1061,7 @@ async function saveEdit() {
 
 // ── TMDB 單部同步演員（自動存庫） ────────────────────────────────────────────────
 async function syncActorsFromTMDB() {
-  if (!editId || !f8abc776cee1400e1fadf2874e1d8c2c) {
+  if (!editId || !TMDB_API_KEY) {
     alert("請先設定 TMDB_API_KEY！");
     return;
   }
@@ -1094,6 +1094,7 @@ async function syncActorsFromTMDB() {
   }
 }
 
+// ── 批次同步全資料庫所有電影演員 ────────────────────────────────────────────────
 let batchSyncRunning = false;
 async function batchSyncAllActors() {
   if(batchSyncRunning) return toast("正在執行中，請稍後","err");
@@ -1117,8 +1118,56 @@ async function batchSyncAllActors() {
     const item = db[i];
     const nowIdx = i+1;
     logBox.innerHTML += `<div>【${nowIdx}/${total}】處理中：${item.title}</div>`;
-    window.scrollTo(0,document.body.scroll
-  
+    window.scrollTo(0,document.body.scrollHeight);
+
+    if(!item.title) {
+      skipNum++;
+      logBox.innerHTML += `<div style="color:var(--amber)">⚠ 無片名，已跳過</div>`;
+      continue;
+    }
+
+    try {
+      const searchRes = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURI(item.title)}&api_key=${TMDB_API_KEY}&language=zh-TW`);
+      const searchData = await searchRes.json();
+      if (!searchData.results?.length) {
+        failNum++;
+        logBox.innerHTML += `<div style="color:var(--red)">❌ 找不到電影：${item.title}</div>`;
+        continue;
+      }
+
+      const tmdbId = searchData.results[0].id;
+      const creditRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/credits?api_key=${TMDB_API_KEY}&language=zh-TW`);
+      const creditData = await creditRes.json();
+      const actors = creditData.cast.slice(0, 12).map(c => c.name).join('、');
+
+      if (!actors) {
+        failNum++;
+        logBox.innerHTML += `<div style="color:var(--red)">❌ 無演員資料：${item.title}</div>`;
+        continue;
+      }
+
+      item.actors = actors;
+      await apiFetch('/db', { method: 'POST', body: JSON.stringify(item) });
+      successNum++;
+      logBox.innerHTML += `<div style="color:var(--accent)">✅ 同步成功：${item.title}</div>`;
+    } catch (e) {
+      failNum++;
+      logBox.innerHTML += `<div style="color:var(--red)">❌ 同步失敗：${item.title} - ${e.message}</div>`;
+    }
+    await new Promise(r => setTimeout(r, 1200));
+  }
+
+  logBox.innerHTML += `<div class="sbox show ok" style="margin-top:15px;">
+    ✅ 批次同步完成！<br>
+    成功：${successNum} 部<br>
+    失敗：${failNum} 部<br>
+    跳過：${skipNum} 部
+  </div>`;
+
+  batchSyncRunning = false;
+  await loadDb();
+}
+
 // ── VIDEO ─────────────────────────────────────────────────────────
 function playVideo(ytId, title) {
   document.getElementById('vm-title').textContent = title;
@@ -1343,7 +1392,7 @@ async function ytSearch() {
     st.textContent = isTmdb
       ? `找到 ${ytResults.length} 筆未在資料庫的結果${year ? `（${year}）` : ''}`
       : `找到 ${ytResults.length} 筆結果，點擊卡片選取`;
-  } catch(e) {
+  } catch (e) {
     st.className = 'sbox show err';
     st.textContent = '搜尋失敗：' + e.message;
   }
@@ -1460,7 +1509,7 @@ async function ytRefresh() {
     }
 
     renderYtResults();
-  } catch(e) {
+  } catch (e) {
     st.className = 'sbox show err';
     st.textContent = '重新整理失敗：' + e.message;
   }
@@ -1559,7 +1608,7 @@ async function tmdbAutoImport() {
             failCount++;
             detailEl.textContent = `「${item.title}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
           }
-        } catch(e) {
+        } catch (e) {
           failCount++;
           detailEl.textContent = `「${item.title}」失敗：${e.message || e}，繼續下一部...`;
         }
@@ -1576,7 +1625,7 @@ async function tmdbAutoImport() {
     detailEl.textContent = successCount < target ? `已處理 ${processedCount} 部，失敗/略過 ${failCount} 部。沒有更多符合條件的作品，或剩餘作品都已在資料庫。` : `已處理 ${processedCount} 部，失敗/略過 ${failCount} 部。`;
     renderYtResults();
     if (successCount > 0) await loadDb();
-  } catch(e) {
+  } catch (e) {
     statusEl.className = 'sbox show err';
     msgEl.textContent = 'TMDB 自動匯入失敗';
     detailEl.textContent = e.message || String(e);
@@ -1625,7 +1674,7 @@ async function analyzeWithRetry(item, msgEl, detailEl, completed, total) {
       }
 
       return analyzeRes;
-    } catch(e) {
+    } catch (e) {
       if (attempt >= maxAttempts) throw e;
       msgEl.textContent = `分析中 (${completed + 1}/${total})：${item.title.slice(0, 28)}...`;
       detailEl.textContent = `連線不穩，等待 8 秒後重試 ${attempt + 1}/${maxAttempts}`;
@@ -1702,7 +1751,7 @@ async function ytBatchAnalyze() {
       } else {
         detailEl.textContent = `⚠ 「${item.title.slice(0,20)}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
       }
-    } catch(e) {
+    } catch (e) {
       detailEl.textContent = `⚠ 連線錯誤：${e.message || e}，繼續下一部...`;
     }
 
@@ -1763,7 +1812,7 @@ async function addKey() {
     st.textContent = r.added ? `✓ 已新增 1 組 Key，目前共 ${r.count} 組` : `✓ 這組 Key 已存在，目前共 ${r.count} 組`;
     inp.value = '';
     loadKeyStatus();
-  } catch(e) {
+  } catch (e) {
     st.className = 'sbox show err';
     st.textContent = '✗ 新增失敗：' + e.message;
   }
@@ -1796,7 +1845,7 @@ async function saveKeys() {
     } else {
       throw new Error(r.error);
     }
-  } catch(e) {
+  } catch (e) {
     st.className = 'sbox show err';
     st.textContent = '✗ 儲存失敗：' + e.message;
   }
@@ -1808,112 +1857,3 @@ setInterval(loadDb, 300000);
 </script>
 </body>
 </html>
-.search-row { display: flex; gap: 8px; margin-bottom: 18px; }
-.search-inp { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; color: var(--text); font-size: 13px; font-family: inherit; outline: none; }
-.search-inp::placeholder { color: var(--text3); }
-.search-inp:focus { border-color: var(--border2); }
-
-.tbl-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-thead tr { border-bottom: 1px solid var(--border); }
-th { text-align: left; padding: 7px 10px; font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.1em; color: var(--text3); text-transform: uppercase; font-weight: 400; white-space: nowrap; }
-td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; color: var(--text2); }
-tbody tr:hover td { background: rgba(255,255,255,0.015); }
-.td-title { color: var(--text); font-weight: 500; font-size: 12.5px; }
-.td-mono { font-family: 'DM Mono', monospace; font-size: 10px; }
-.td-acts { display: flex; gap: 3px; }
-
-.chips { display: flex; flex-wrap: wrap; gap: 3px; }
-.chip { font-size: 10px; padding: 1px 6px; border-radius: 99px; border: 1px solid var(--border); color: var(--text3); font-family: 'DM Mono', monospace; }
-.chip.sc { border-color: rgba(122,184,242,0.28); color: var(--blue); }
-.chip.gn { border-color: rgba(212,242,122,0.28); color: var(--accent); }
-.chip.md { border-color: rgba(242,201,122,0.28); color: var(--amber); }
-.thumb { width: 60px; height: 34px; object-fit: cover; border-radius: 4px; background: var(--surface2); display: block; cursor: pointer; }
-
-.field { margin-bottom: 11px; }
-.fl { display: block; font-size: 9.5px; font-family: 'DM Mono', monospace; letter-spacing: 0.08em; color: var(--text3); text-transform: uppercase; margin-bottom: 4px; }
-.fi, .fta { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px; color: var(--text); font-size: 12.5px; font-family: inherit; outline: none; }
-.fi:focus, .fta:focus { border-color: var(--border2); }
-.fta { resize: vertical; min-height: 56px; line-height: 1.5; }
-.f2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.fhint { font-size: 10.5px; color: var(--text3); margin-top: 3px; }
-
-.steps { display: flex; flex-direction: column; gap: 14px; max-width: 580px; }
-.step { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; transition: border-color 0.2s; }
-.step.s-active { border-color: rgba(212,242,122,0.35); }
-.step.s-done { border-color: rgba(122,184,242,0.2); opacity: 0.65; }
-.step-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
-.step-n { width: 20px; height: 20px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border2); font-size: 9px; font-family: 'DM Mono', monospace; color: var(--text3); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.step.s-active .step-n { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-.step.s-done .step-n { background: var(--blue-dim); border-color: var(--blue); color: var(--blue); }
-.step-title { font-size: 12.5px; font-weight: 500; color: var(--text); }
-.step-desc { font-size: 11px; color: var(--text2); margin-bottom: 10px; line-height: 1.5; }
-
-.sbox { padding: 9px 12px; border-radius: var(--radius); font-size: 11px; font-family: 'DM Mono', monospace; border: 1px solid var(--border); background: var(--surface); color: var(--text2); display: none; line-height: 1.6; margin-bottom: 10px; }
-.sbox.show { display: block; }
-.sbox.loading { color: var(--amber); border-color: rgba(242,201,122,0.2); }
-.sbox.ok { color: var(--accent); border-color: rgba(212,242,122,0.2); }
-.sbox.err { color: var(--red); border-color: rgba(242,122,122,0.2); }
-
-.yt-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--blue); background: var(--blue-dim); border: 1px solid rgba(122,184,242,0.2); border-radius: 4px; padding: 2px 7px; margin-top: 4px; }
-
-.io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.io-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; }
-.io-title { font-size: 12.5px; font-weight: 500; margin-bottom: 5px; }
-.io-desc { font-size: 11px; color: var(--text2); margin-bottom: 12px; line-height: 1.5; }
-.drop-zone { border: 1px dashed var(--border2); border-radius: var(--radius); padding: 20px; text-align: center; color: var(--text3); font-size: 11.5px; cursor: pointer; transition: all 0.15s; margin-bottom: 8px; }
-.drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
-
-.mo { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 50; align-items: center; justify-content: center; padding: 20px; }
-.mo.open { display: flex; }
-.mo-box { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; padding: 24px; }
-.mo-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 500; margin-bottom: 18px; }
-.mo-x { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 17px; padding: 2px 5px; border-radius: 4px; }
-.mo-x:hover { color: var(--text); background: var(--surface2); }
-
-.vm { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 100; align-items: center; justify-content: center; }
-.vm.open { display: flex; }
-.vm-box { background: #000; border-radius: 10px; overflow: hidden; width: min(700px, 95vw); }
-.vm-box iframe { display: block; width: 100%; aspect-ratio: 16/9; border: none; }
-.vm-bar { display: flex; align-items: center; justify-content: space-between; padding: 9px 13px; background: #111; }
-.vm-title { font-size: 11px; font-family: 'DM Mono', monospace; color: #999; }
-
-.empty { text-align: center; padding: 56px 20px; color: var(--text3); }
-.empty-ico { font-size: 30px; margin-bottom: 10px; opacity: 0.35; }
-
-#toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 9px 14px; font-size: 11.5px; color: var(--text); z-index: 999; opacity: 0; transform: translateY(6px); transition: all 0.18s; pointer-events: none; font-family: 'DM Mono', monospace; }
-#toast.show { opacity: 1; transform: translateY(0); }
-#toast.ok { border-color: rgba(212,242,122,0.3); color: var(--accent); }
-#toast.err { border-color: rgba(242,122,122,0.3); color: var(--red); }
-
-.yt-card {
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); overflow: hidden; cursor: pointer;
-  transition: border-color 0.15s; position: relative; user-select: none;
-}
-.yt-card:hover { border-color: var(--border2); }
-.yt-card.selected { border-color: var(--accent); background: var(--accent-dim); }
-.yt-card.in-db { opacity: 0.5; }
-.yt-card.in-db::after {
-  content: '已在庫中'; position: absolute; top: 6px; right: 6px;
-  background: rgba(0,0,0,0.7); color: var(--accent); font-size: 9px;
-  font-family: 'DM Mono', monospace; padding: 2px 6px; border-radius: 4px;
-}
-.yt-thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
-.yt-info { padding: 8px 10px; }
-.yt-title { font-size: 11.5px; font-weight: 500; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.yt-meta { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; }
-.yt-check {
-  position: absolute; top: 6px; left: 6px; width: 18px; height: 18px;
-  border-radius: 50%; background: rgba(0,0,0,0.6); border: 1.5px solid rgba(255,255,255,0.4);
-  display: flex; align-items: center; justify-content: center; font-size: 10px; color: white;
-}
-.yt-card.selected .yt-check { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-
-.spin { display: inline-block; width: 11px; height: 11px; border: 1.5px solid rgba(255,255,255,0.15); border-top-color: var(--amber); border-radius: 50%; animation: rot 0.65s linear infinite; vertical-align: middle; margin-right: 5px; }
-@keyframes rot { to{transform:rotate(360deg)} }
-
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-
-
