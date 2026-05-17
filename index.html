@@ -603,8 +603,20 @@ function go(name, el) {
   if (name === 'settings') loadKeyStatus();
 }
 
+// ── TMDB 圖片取得（自動） ───────────────────────────────────
+async function getTMDBThumbnail(title) {
+  try {
+    const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURI(title)}&api_key=${TMDB_API_KEY}&language=zh-TW`);
+    const data = await res.json();
+    if (data.results?.length && data.results[0].poster_path) {
+      return "https://image.tmdb.org/t/p/w500" + data.results[0].poster_path;
+    }
+  } catch (e) {}
+  return "https://img.youtube.com/vi/" + curYtId + "/mqdefault.jpg";
+}
+
 // ── LIST ──────────────────────────────────────────────────────────
-function renderList() {
+async function renderList() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   const rows = q ? db.filter(m =>
     [m.title, m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
@@ -615,39 +627,44 @@ function renderList() {
   if (!rows.length) { body.innerHTML = ''; empty.style.display = 'block'; updateReanalyzeBar(); return; }
   empty.style.display = 'none';
 
-  body.innerHTML = rows.map(m => `
-    <tr>
-      <td>
-        <input type="checkbox" ${reanalyzeSelectedIds.has(m.id) ? 'checked' : ''}
-          onchange="reanalyzeToggle('${m.id}', this.checked)"
-          style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
-      </td>
-      <td>
-        <img class="thumb" src="${m.poster || m.thumb || `https://img.youtube.com/vi/${m.ytId}/mqdefault.jpg`}"
-          onclick="playVideo('${m.ytId}','${esc(m.title)}')"
-          title="▶ 點擊播放"
-          style="cursor:pointer;transition:opacity 0.15s"
-          onmouseover="this.style.opacity=0.75"
-          onmouseout="this.style.opacity=1"
-          onerror="this.style.background='#222'">
-      </td>
-      <td>
-        <div class="td-title">${m.title}</div>
-        <div style="font-size:10.5px;color:var(--text3);margin-top:1px">${m.desc ? m.desc.slice(0,40)+(m.desc.length>40?'…':'') : ''}</div>
-      </td>
-      <td><div class="chips">${(m.scenesMain||[]).map(t=>`<span class="chip sc">${t}</span>`).join('')}</div></td>
-      <td><div class="chips">${(m.scenesSub||[]).map(t=>`<span class="chip sc" style="opacity:0.7">${t}</span>`).join('')}</div></td>
-      <td><div class="chips">
-        ${(m.genres||[]).map(t=>`<span class="chip gn">${t}</span>`).join('')}
-        ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
-      </div></td>
-      <td><div class="td-actors" style="font-size:12px;color:var(--text);">${m.actors || '未填寫'}</div></td>
-      <td><div class="td-acts" style="text-align:right;">
-        <button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
-        <button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
-        <button class="btn btn-sm btn-danger" onclick="del('${m.id}','${esc(m.title)}')">刪</button>
-      </div></td>
-    </tr>`).join('');
+  let html = '';
+  for (const m of rows) {
+    const thumb = await getTMDBThumbnail(m.title);
+    html += `
+      <tr>
+        <td>
+          <input type="checkbox" ${reanalyzeSelectedIds.has(m.id) ? 'checked' : ''}
+            onchange="reanalyzeToggle('${m.id}', this.checked)"
+            style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
+        </td>
+        <td>
+          <img class="thumb" src="${thumb}"
+            onclick="playVideo('${m.ytId}','${esc(m.title)}')"
+            title="▶ 點擊播放預告片"
+            style="cursor:pointer;transition:opacity 0.15s"
+            onmouseover="this.style.opacity=0.75"
+            onmouseout="this.style.opacity=1"
+            onerror="this.style.background='#222'">
+        </td>
+        <td>
+          <div class="td-title">${m.title}</div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:1px">${m.desc ? m.desc.slice(0,40)+(m.desc.length>40?'…':'') : ''}</div>
+        </td>
+        <td><div class="chips">${(m.scenesMain||[]).map(t=>`<span class="chip sc">${t}</span>`).join('')}</div></td>
+        <td><div class="chips">${(m.scenesSub||[]).map(t=>`<span class="chip sc" style="opacity:0.7">${t}</span>`).join('')}</div></td>
+        <td><div class="chips">
+          ${(m.genres||[]).map(t=>`<span class="chip gn">${t}</span>`).join('')}
+          ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
+        </div></td>
+        <td><div class="td-actors" style="font-size:12px;color:var(--text);">${m.actors || '未填寫'}</div></td>
+        <td><div class="td-acts" style="text-align:right;">
+          <button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
+          <button class="btn btn-sm" onclick="openEdit('${m.id}')">編輯</button>
+          <button class="btn btn-sm btn-danger" onclick="del('${m.id}','${esc(m.title)}')">刪</button>
+        </div></td>
+      </tr>`;
+  }
+  body.innerHTML = html;
   updateReanalyzeBar();
 }
 
