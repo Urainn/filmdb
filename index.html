@@ -604,7 +604,8 @@ function go(name, el) {
 }
 
 // ── TMDB 圖片取得（自動） ───────────────────────────────────
-async function getTMDBThumbnail(title) {
+// ── TMDB 圖片取得（自動） ───────────────────────────────────
+async function getTMDBThumbnail(title, ytId) {
   try {
     const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURI(title)}&api_key=${TMDB_API_KEY}&language=zh-TW`);
     const data = await res.json();
@@ -612,7 +613,14 @@ async function getTMDBThumbnail(title) {
       return "https://image.tmdb.org/t/p/w500" + data.results[0].poster_path;
     }
   } catch (e) {}
-  return "https://img.youtube.com/vi/" + curYtId + "/mqdefault.jpg";
+
+  // TMDB 找不到 → 用該部電影自己的 YouTube 縮圖
+  if (ytId) {
+    return "https://img.youtube.com/vi/" + ytId + "/mqdefault.jpg";
+  }
+
+  // 連 YT 都沒有 → 兜底圖
+  return "https://via.placeholder.com/500x750/1a1a1a/e8e6e1?text=No+Image";
 }
 
 // ── LIST ──────────────────────────────────────────────────────────
@@ -629,7 +637,9 @@ async function renderList() {
 
   let html = '';
   for (const m of rows) {
-    const thumb = await getTMDBThumbnail(m.title);
+    // 重點：傳入「該部電影自己的 ytId」
+    const thumb = await getTMDBThumbnail(m.title, m.ytId);
+    
     html += `
       <tr>
         <td>
@@ -644,7 +654,7 @@ async function renderList() {
             style="cursor:pointer;transition:opacity 0.15s"
             onmouseover="this.style.opacity=0.75"
             onmouseout="this.style.opacity=1"
-            onerror="this.style.background='#222'">
+            onerror="this.src='https://via.placeholder.com/500x750/1a1a1a/e8e6e1?text=Load+Fail'">
         </td>
         <td>
           <div class="td-title">${m.title}</div>
