@@ -686,20 +686,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(200, call_gemini_analyze(yt_url))
 
-        elif path == "/db":
+                elif path == "/db":
+            print("=== 前端匯入 JSON 偵錯 ===")
+            print("收到資料：", body)
+
             if not body.get("title") or not body.get("ytId"):
+                print("錯誤：缺少 title 或 ytId")
                 self.send_json(400, {"ok": False, "error": "缺少 title 或 ytId"})
                 return
+
             if not body.get("id"):
                 body["id"] = uid()
+
             try:
                 row = db_find_row(body["id"])
                 if row:
                     db_update_row(row, body)
+                    print("✅ 覆蓋舊資料成功")
                 else:
                     db_append(body)
-                self.send_json(200, {"ok": True})
+                    print("✅ 新增資料成功")
+
+                self.send_json(200, {"ok": True, "msg": "匯入成功！"})
             except Exception as e:
+                print("❌ 失敗：", e)
                 self.send_json(200, {"ok": False, "error": str(e)})
 
         elif path == "/youtube/search":
