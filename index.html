@@ -196,6 +196,12 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="nav-item" onclick="go('search-yt',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg>批次搜尋匯入
     </div>
+
+    <div class="nav-label" style="margin-top:6px">APP 專用</div>
+    <div class="nav-item" onclick="go('sheets',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/></svg>APP 電影卡片
+    </div>
+
     <div class="nav-label" style="margin-top:6px">工具</div>
     <div class="nav-item" onclick="go('io',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="4,6 8,2 12,6"/><line x1="8" y1="2" x2="8" y2="10"/><line x1="2" y1="13" x2="14" y2="13"/></svg>匯出 / 匯入
@@ -348,7 +354,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div><div class="page-title">批次搜尋匯入</div><div class="page-sub">搜尋 YouTube 預告片，勾選後一鍵批次分析存入資料庫</div></div>
     </div>
 
-    <!-- 搜尋列 -->
     <div style="display:flex;gap:8px;margin-bottom:20px;max-width:820px;flex-wrap:wrap">
       <select id="search-source" onchange="onSearchSourceChange()" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;color:var(--text);font-family:inherit;font-size:12px;outline:none">
         <option value="youtube">YouTube</option>
@@ -372,12 +377,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <button class="btn" onclick="tmdbAutoImport()" id="btn-tmdb-auto" style="display:none">✦ TMDB 自動匯入</button>
     </div>
 
-    <!-- 搜尋提示 -->
     <div style="font-size:10.5px;color:var(--text3);margin-bottom:10px;max-width:640px">
       💡 建議加入「台灣」「中文」「華語」等關鍵字，搜尋結果更精準
     </div>
 
-    <!-- 篩選選項 -->
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;max-width:640px">
       <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);cursor:pointer;user-select:none">
         <input type="checkbox" id="hide-in-db" onchange="renderYtResults()"
@@ -387,10 +390,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <span id="yt-filter-count" style="font-size:10.5px;color:var(--text3);font-family:'DM Mono',monospace"></span>
     </div>
 
-    <!-- 搜尋狀態 -->
     <div class="sbox" id="yt-search-status" style="margin-bottom:16px;max-width:640px"></div>
-
-    <!-- 篩選列 -->
     <div id="yt-filter-bar" style="display:none;margin-bottom:12px;align-items:center;gap:10px">
       <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);cursor:pointer;user-select:none">
         <input type="checkbox" id="yt-hide-indb" onchange="renderYtResults()" checked
@@ -400,7 +400,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <span id="yt-filter-count" style="font-size:10.5px;color:var(--text3);font-family:'DM Mono',monospace"></span>
     </div>
 
-    <!-- 批次操作列 -->
     <div id="yt-batch-bar" style="display:none;margin-bottom:12px;display:none;align-items:center;gap:10px;flex-wrap:wrap">
       <span id="yt-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace"></span>
       <button class="btn btn-sm" onclick="ytSelectAll()">全選</button>
@@ -411,7 +410,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </button>
     </div>
 
-    <!-- 批次進度 -->
     <div id="yt-batch-progress" style="display:none;margin-bottom:16px;max-width:640px">
       <div class="sbox show loading" id="yt-batch-status">
         <span class="spin"></span><span id="yt-batch-msg">準備中...</span>
@@ -422,8 +420,28 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="font-size:10px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace" id="yt-batch-detail"></div>
     </div>
 
-    <!-- 搜尋結果 -->
     <div id="yt-results-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;max-width:900px"></div>
+  </div>
+
+  <!-- APP SHEETS CARD -->
+  <div id="panel-sheets" class="panel">
+    <div class="page-head">
+      <div><div class="page-title">APP 專用電影卡片 sheets_card</div><div class="page-sub>給手機 APP / 前端直接讀取的標準卡片格式</div></div>
+    </div>
+
+    <div style="max-width:600px; margin-bottom:20px">
+      <div class="field">
+        <label class="fl">輸入使用者名稱（多人獨立喜好）</label>
+        <input class="fi" id="app-user" type="text" placeholder="例如：Alice、Bob、小明">
+      </div>
+      <div class="btn-row">
+        <button class="btn" onclick="loadAppCards()">載入全部 APP 卡片</button>
+        <button class="btn btn-accent" onclick="loadAppRecommend()">載入個人化推薦</button>
+      </div>
+    </div>
+
+    <div id="app-status" style="margin-bottom:16px"></div>
+    <div id="app-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px"></div>
   </div>
 
   <!-- SETTINGS -->
@@ -507,10 +525,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 <div id="toast"></div>
 
 <script>
-// ── 伺服器位址 ───────────────────────────────────────────────────
 const API = window.location.origin;
 const TMDB_API_KEY = "f8abc776cee1400e1fadf2874e1d8c2c";
-// ────────────────────────────────────────────────────────────────
 
 let db = [];
 let editId = null;
@@ -521,7 +537,12 @@ let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
 let reanalyzeRunning = false;
 
-// ── API 呼叫 ──────────────────────────────────────────────────────
+let userBehaviorDB = [];
+const WEIGHT_LIKE_MOOD = 2;
+const WEIGHT_LIKE_GENRE = 3;
+const WEIGHT_LIKE_SCENE = 1;
+const WEIGHT_DISLIKE = -2;
+
 async function apiFetch(path, options = {}) {
   const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -535,7 +556,6 @@ async function apiFetch(path, options = {}) {
   }
 }
 
-// ── 載入資料庫 ────────────────────────────────────────────────────
 async function loadDb() {
   try {
     const res = await fetch(API + '/db', {
@@ -568,7 +588,6 @@ function updateStats() {
   document.getElementById('s-genres').textContent = gn.size;
 }
 
-// ── 伺服器狀態 ────────────────────────────────────────────────────
 async function checkServer() {
   setServerStatus(serverOnline);
 }
@@ -588,14 +607,13 @@ function setServerStatus(online) {
   }
 }
 
-// ── NAV ───────────────────────────────────────────────────────────
 function go(name, el) {
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('panel-'+name).classList.add('active');
   if (el) el.classList.add('active');
   else {
-    const map = {list:0, add:1, 'search-yt':2, io:3, settings:4};
+    const map = {list:0, add:1, 'search-yt':2, io:3, settings:4, sheets:5};
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
@@ -603,8 +621,6 @@ function go(name, el) {
   if (name === 'settings') loadKeyStatus();
 }
 
-// ── TMDB 圖片取得（自動） ───────────────────────────────────
-// ── TMDB 圖片取得（自動） ───────────────────────────────────
 async function getTMDBThumbnail(title, ytId) {
   try {
     const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURI(title)}&api_key=${TMDB_API_KEY}&language=zh-TW`);
@@ -614,16 +630,13 @@ async function getTMDBThumbnail(title, ytId) {
     }
   } catch (e) {}
 
-  // TMDB 找不到 → 用該部電影自己的 YouTube 縮圖
   if (ytId) {
     return "https://img.youtube.com/vi/" + ytId + "/mqdefault.jpg";
   }
 
-  // 連 YT 都沒有 → 兜底圖
   return "https://via.placeholder.com/500x750/1a1a1a/e8e6e1?text=No+Image";
 }
 
-// ── LIST ──────────────────────────────────────────────────────────
 async function renderList() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   const rows = q ? db.filter(m =>
@@ -637,7 +650,6 @@ async function renderList() {
 
   let html = '';
   for (const m of rows) {
-    // 重點：傳入「該部電影自己的 ytId」
     const thumb = await getTMDBThumbnail(m.title, m.ytId);
     
     html += `
@@ -759,8 +771,7 @@ async function lookupYoutubeCleanTitle(item) {
       body: JSON.stringify({ ytId: item.ytId, url: item.url })
     });
     if (info.ok) return info.cleanTitle || cleanMovieTitle(info.title) || info.title || '';
-  } catch(e) {
-  }
+  } catch(e) {}
   return '';
 }
 
@@ -842,7 +853,6 @@ async function runReanalyzeQueue(items) {
   await loadDb();
 }
 
-// ── ADD ───────────────────────────────────────────────────────────
 function resetAdd() {
   curYtId = '';
   curVideoTitle = '';
@@ -875,8 +885,7 @@ async function onUrl() {
       curVideoTitle = info.cleanTitle || cleanMovieTitle(info.title) || info.title || '';
       document.getElementById('yt-tag').innerHTML = `<div class="yt-tag">▶ ID: ${curYtId}${curVideoTitle ? ` · ${curVideoTitle}` : ''}</div>`;
     }
-  } catch(e) {
-  }
+  } catch(e) {}
 }
 
 const ANALYZE_MSGS = [
@@ -1044,7 +1053,6 @@ async function saveEntry() {
   } catch(e) { toast('儲存失敗：' + e.message, 'err'); }
 }
 
-// ── EDIT ──────────────────────────────────────────────────────────
 function openEdit(id) {
   const m = db.find(x=>x.id===id); if (!m) return;
   editId = id;
@@ -1086,7 +1094,6 @@ async function saveEdit() {
   } catch(e) { toast('儲存失敗', 'err'); }
 }
 
-// ── TMDB 單部同步演員（自動存庫） ────────────────────────────────────────────────
 async function syncActorsFromTMDB() {
   if (!editId || !TMDB_API_KEY) {
     alert("請先設定 TMDB_API_KEY！");
@@ -1121,7 +1128,6 @@ async function syncActorsFromTMDB() {
   }
 }
 
-// ── 批次同步全資料庫所有電影演員 ────────────────────────────────────────────────
 let batchSyncRunning = false;
 async function batchSyncAllActors() {
   if(batchSyncRunning) return toast("正在執行中，請稍後","err");
@@ -1195,7 +1201,6 @@ async function batchSyncAllActors() {
   await loadDb();
 }
 
-// ── VIDEO ─────────────────────────────────────────────────────────
 function playVideo(ytId, title) {
   document.getElementById('vm-title').textContent = title;
   document.getElementById('yt-frame').src = `https://www.youtube.com/embed/${ytId}?autoplay=1`;
@@ -1206,7 +1211,6 @@ function closeVideo() {
   document.getElementById('yt-frame').src = '';
 }
 
-// ── IO ────────────────────────────────────────────────────────────
 async function exportDb() {
   const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'film-db.json'; a.click();
@@ -1271,7 +1275,6 @@ async function clearAll() {
   toast('資料庫已清空');
 }
 
-// ── UTILS ─────────────────────────────────────────────────────────
 function split(s) { return s.split(/[,，、\s]+/).map(x=>x.trim()).filter(Boolean); }
 function join(a) { return (a||[]).join('、'); }
 function esc(s) { return (s||'').replace(/'/g,"\\'"); }
@@ -1309,7 +1312,6 @@ function toast(msg, type='') {
   clearTimeout(tt); tt = setTimeout(()=>el.className='', 2400);
 }
 
-// ── YOUTUBE SEARCH ───────────────────────────────────────────────
 let ytResults = [];
 let ytSelected = new Set();
 let ytNextPageToken = '';
@@ -1795,7 +1797,6 @@ async function ytBatchAnalyze() {
   if (successCount > 0) await loadDb();
 }
 
-// ── SETTINGS ─────────────────────────────────────────────────────
 async function loadKeyStatus() {
   const el = document.getElementById('keys-status');
   if (!el) return;
@@ -1878,7 +1879,117 @@ async function saveKeys() {
   }
 }
 
-// ── INIT ──────────────────────────────────────────────────────────
+// =====================================================================
+// APP sheets_card 功能
+// =====================================================================
+async function loadSheetCards() {
+  try {
+    const res = await apiFetch("/api/sheets_card");
+    return res || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+async function getUser(userName) {
+  try {
+    const res = await apiFetch("/api/user/get", {
+      method: "POST",
+      body: JSON.stringify({ userName })
+    });
+    return res.user;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function likeMovie(userName, movieId) {
+  try {
+    await apiFetch("/api/user/like", {
+      method: "POST",
+      body: JSON.stringify({ userName, movieId })
+    });
+    toast("已記錄喜歡", "ok");
+    return true;
+  } catch (e) {
+    toast("喜歡失敗", "err");
+    return false;
+  }
+}
+
+async function dislikeMovie(userName, movieId) {
+  try {
+    await apiFetch("/api/user/dislike", {
+      method: "POST",
+      body: JSON.stringify({ userName, movieId })
+    });
+    toast("已記錄不喜歡", "ok");
+    return true;
+  } catch (e) {
+    toast("不喜歡失敗", "err");
+    return false;
+  }
+}
+
+async function getRecommendCards(userName, limit = 20) {
+  try {
+    const res = await apiFetch("/api/sheets_card/recommend", {
+      method: "POST",
+      body: JSON.stringify({ userName, limit })
+    });
+    return res || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function renderAppCards(cards) {
+  const grid = document.getElementById("app-cards-grid");
+  const status = document.getElementById("app-status");
+
+  if (!cards.length) {
+    grid.innerHTML = "<div style='color:#888'>無資料</div>";
+    return;
+  }
+
+  status.innerHTML = `<div class='sbox show ok'>共 ${cards.length} 張 APP 卡片</div>`;
+
+  grid.innerHTML = cards.map(c => `
+    <div class="yt-card">
+      <img class="yt-thumb" src="${c.poster}" alt="${c.title}">
+      <div class="yt-info">
+        <div class="yt-title">${c.title}</div>
+        <div style="font-size:10px;color:#888;margin-top:4px">
+          ${c.genres.slice(0,2).join("、")}
+        </div>
+      </div>
+      <div style="padding:8px;display:flex;gap:6px">
+        <button class="btn btn-sm" onclick="likeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👍 喜歡</button>
+        <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👎 不喜歡</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadAppCards() {
+  const cards = await loadSheetCards();
+  renderAppCards(cards);
+}
+
+async function loadAppRecommend() {
+  const user = document.getElementById("app-user").value.trim() || "guest";
+  if (!user) {
+    alert("請輸入使用者名稱");
+    return;
+  }
+  await getUser(user);
+  const cards = await getRecommendCards(user);
+  renderAppCards(cards);
+}
+
+// =====================================================================
+// INIT
+// =====================================================================
 loadDb();
 setInterval(loadDb, 300000);
 </script>
