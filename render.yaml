@@ -5,19 +5,13 @@ services:
     buildCommand: pip install cryptography
     startCommand: python server.py
     envVars:
-      - key: PORT
-        value: 8765
       - key: GEMINI_API_KEY
-        value: AIzaSyB7kF9sD2xQ8wE5rT1yU3iO7pA4sG6hJ0kL
-      - key: YOUTUBE_API_KEY
-        value: AIzaSyCnX2z8xL4Xg0QdF7hJk9mP2sR5tU8vY1a
-      - key: TMDB_API_KEY
-        value: 2dca21d2886540666435864f88656876
+        sync: false
+      - key: SHEETS_CREDS
+        sync: false
       - key: SPREADSHEET_ID
         value: 1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw
-      - key: SHEET_NAME
-        value: films
-      - key: SHEETS_CREDS
+      - key: TMDB_API_KEY
         sync: false
 routes:
   - type: rewrite
