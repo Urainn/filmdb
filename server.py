@@ -185,11 +185,18 @@ def db_read():
         rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
         records = []
         for row in rows:
-            if row:
-                try:
-                    records.append(json.loads(row[0]))
-                except:
-                    pass
+            if not row:
+                continue
+            cell = row[0].strip()
+            if not cell:
+                continue
+            try:
+                data = json.loads(cell)
+                # 只讀正常電影資料，壞掉的自動跳過
+                if isinstance(data, dict) and data.get("id") and data.get("title"):
+                    records.append(data)
+            except:
+                continue
         return records
     except:
         return []
