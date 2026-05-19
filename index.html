@@ -629,20 +629,26 @@ function go(name, el) {
   if (name === 'settings') loadKeyStatus();
 }
 
-async function getTMDBThumbnail(title, ytId) {
-  try {
-    const res = await fetch(`https://api.themoviedb.org/3/search/movie?query=${encodeURI(title)}&api_key=${TMDB_API_KEY}&language=zh-TW`);
-    const data = await res.json();
-    if (data.results?.length && data.results[0].poster_path) {
-      return "https://image.tmdb.org/t/p/w500" + data.results[0].poster_path;
-    }
-  } catch (e) {}
+// ✅ 修復：自動抓取電影海報 / YouTube 縮圖
+async function getMoviePoster(card) {
+  const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
+  const YT_IMG = "https://img.youtube.com/vi/";
 
-  if (ytId) {
-    return "https://img.youtube.com/vi/" + ytId + "/mqdefault.jpg";
+  // 1. 優先使用 TMDB 海報
+  if (card.poster && card.poster.trim()) {
+    if (card.poster.startsWith("/")) {
+      return TMDB_IMG + card.poster;
+    }
+    return card.poster;
   }
 
-  return "https://via.placeholder.com/500x750/1a1a1a/e8e6e1?text=No+Image";
+  // 2. 沒有海報 → 用 YouTube 縮圖
+  if (card.ytId && card.ytId.trim()) {
+    return YT_IMG + card.ytId + "/hqdefault.jpg";
+  }
+
+  // 3. 都沒有 → 預設圖
+  return "https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=無海報";
 }
 
 async function renderList() {
@@ -658,7 +664,7 @@ async function renderList() {
 
   let html = '';
   for (const m of rows) {
-    const thumb = await getTMDBThumbnail(m.title, m.ytId);
+    const thumb = await getMoviePoster(m);
     
     html += `
       <tr>
@@ -1954,7 +1960,8 @@ async function getRecommendCards(userName, limit = 20) {
   }
 }
 
-function renderAppCards(cards) {
+// ✅ 修復：APP 電影卡片海報自動顯示
+async function renderAppCards(cards) {
   const grid = document.getElementById("app-cards-grid");
   const status = document.getElementById("app-status");
 
@@ -1965,21 +1972,27 @@ function renderAppCards(cards) {
 
   status.innerHTML = `<div class='sbox show ok'>共 ${cards.length} 張 APP 卡片</div>`;
 
-  grid.innerHTML = cards.map(c => `
-    <div class="yt-card">
-      <img class="yt-thumb" src="${c.poster}" alt="${c.title}">
-      <div class="yt-info">
-        <div class="yt-title">${c.title}</div>
-        <div style="font-size:10px;color:#888;margin-top:4px">
-          ${c.genres.slice(0,2).join("、")}
+  let html = "";
+  for (const c of cards) {
+    const poster = await getMoviePoster(c);
+    html += `
+      <div class="yt-card">
+        <img class="yt-thumb" src="${poster}" alt="${c.title}" 
+             onerror="this.src='https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=載入失敗'">
+        <div class="yt-info">
+          <div class="yt-title">${c.title}</div>
+          <div style="font-size:10px;color:#888;margin-top:4px">
+            ${c.genres.slice(0,2).join("、")}
+          </div>
+        </div>
+        <div style="padding:8px;display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="likeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👍 喜歡</button>
+          <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👎 不喜歡</button>
         </div>
       </div>
-      <div style="padding:8px;display:flex;gap:6px">
-        <button class="btn btn-sm" onclick="likeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👍 喜歡</button>
-        <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👎 不喜歡</button>
-      </div>
-    </div>
-  `).join("");
+    `;
+  }
+  grid.innerHTML = html;
 }
 
 async function loadAppCards() {
