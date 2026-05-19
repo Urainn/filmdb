@@ -185,16 +185,17 @@ def db_read():
         rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
         records = []
         for row in rows:
-            if not row: continue
+            if not row:
+                continue
             cell = row[0].strip()
-            if not cell: continue
+            if not cell:
+                continue
             try:
                 data = json.loads(cell)
-                # 只要是 JSON 物件 + 有標題 + 有 ytId 就讀取
-                if isinstance(data, dict) and data.get("title") and data.get("ytId"):
-                    # 自動補 id，讓前端可以顯示
+                # 只要是 JSON 物件就收，不強制驗證，只補 id
+                if isinstance(data, dict):
                     if not data.get("id"):
-                        data["id"] = data["ytId"]
+                        data["id"] = data.get("ytId", "id_" + str(len(records)))
                     records.append(data)
             except:
                 continue
@@ -574,14 +575,15 @@ class Handler(BaseHTTPRequestHandler):
     movies = db_read()
     sheets_card = []
     for m in movies:
+        # 強制確保每張卡片都有必要欄位
         card = {
             "id": m.get("id", m.get("ytId", "")),
             "title": m.get("title", ""),
             "poster": m.get("poster") or m.get("thumb", ""),
-            "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+            "scenes": (m.get("scenesMain", []) + m.get("scenesSub", [])),
             "genres": m.get("genres", []),
             "moods": m.get("moods", []),
-            "actors": m.get("cast", ""),
+            "actors": m.get("cast", []),
             "url": m.get("url", ""),
             "ytId": m.get("ytId", "")
         }
