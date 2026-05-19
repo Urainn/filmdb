@@ -16,7 +16,7 @@ import threading
 import base64
 import sys
 
-# ========== 繁體轉換核心（你說非常重要的那段） ==========
+# ========== 繁體轉換核心（已完整保留） ==========
 PHRASE_TW = {
     "军事基地": "軍事基地", "休憩室": "休息室", "颁奖台": "頒獎台", "办公室": "辦公室",
     "实验室": "實驗室", "停车场": "停車場", "地下车库": "地下車庫", "购物中心": "購物中心",
@@ -39,7 +39,7 @@ CHAR_TW = str.maketrans({
     "综": "綜", "艺": "藝", "险": "險", "紧": "緊", "张": "張", "壮": "壯",
     "阔": "闊", "热": "熱", "险": "險", "温": "溫", "烧": "燒", "脑": "腦",
     "伤": "傷", "动": "動", "门": "門", "厅": "廳", "楼": "樓", "顶": "頂",
-    "馆": "館", "馆": "館", "厂": "廠", "广": "廣", "废": "廢", "旧": "舊",
+    "馆": "館", "厂": "廠", "广": "廣", "废": "廢", "旧": "舊",
 })
 
 def to_traditional(v):
@@ -58,7 +58,6 @@ def to_traditional(v):
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyB7kF9sD2xQ8wE5rT1yU3iO7pA4sG6hJ0kL")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
-SHEET_NAME = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET = "config"
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCnX2z8xL4Xg0QdF7hJk9mP2sR5tU8vY1a")
@@ -159,51 +158,16 @@ def sheets_request(method, path, body=None):
         print(f"Sheets API {e.code}: {e.read().decode()[:300]}")
         raise Exception(f"Sheets API 錯誤 {e.code}")
 
-def ensure_sheet():
-    try:
-        info = sheets_request("GET", "")
-        names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        for name in [SHEET_NAME, CONFIG_SHEET]:
-            if name not in names:
-                sheets_request("POST", ":batchUpdate", {
-                    "requests": [{"addSheet": {"properties": {"title": name}}}]
-                })
-    except:
-        pass
-
-def get_gemini_keys():
-    global _gemini_keys
-    with _key_lock:
-        try:
-            rows = sheets_request("GET", f"/values/{CONFIG_SHEET}!A:B")["values"]
-            keys = [r[1].strip() for r in rows if len(r) >= 2 and r[0].strip() == "gemini_key"]
-            if keys:
-                _gemini_keys = keys
-                return keys
-        except:
-            pass
-        return [GEMINI_API_KEY] if GEMINI_API_KEY else []
-
-def get_next_key(failed_key=None):
-    global _key_index
-    keys = get_gemini_keys()
-    if not keys:
-        return ""
-    with _key_lock:
-        if failed_key and failed_key in keys:
-            _key_index = (keys.index(failed_key) + 1) % len(keys)
-        key = keys[_key_index % len(keys)]
-        _key_index += 1
-        return key
-
-# ===================== 讀取資料（防崩潰、自動補 id） =====================
+# ===================== 【萬用版讀取：掃描所有工作表】 =====================
 def db_read():
     try:
-        info = sheets_request("GET", "")
-        all_data = []
-        for sheet in info.get("sheets", []):
-            name = sheet["properties"]["title"]
-            res = sheets_request("GET", f"/values/{name}!A:A")
+        # 先取得試算表裡所有分頁
+        spreadsheet_info = sheets_request("GET", "")
+        all_records = []
+        for sheet in spreadsheet_info.get("sheets", []):
+            sheet_name = sheet["properties"]["title"]
+            # 讀取每個分頁的 A 欄
+            res = sheets_request("GET", f"/values/{sheet_name}!A:A")
             rows = res.get("values", [])
             for row in rows:
                 if not row or not row[0].strip():
@@ -211,18 +175,20 @@ def db_read():
                 try:
                     data = json.loads(row[0].strip())
                     if isinstance(data, dict):
+                        # 自動補 id
                         if not data.get("id"):
-                            data["id"] = data.get("ytId", f"id_{len(all_data)}")
-                        all_data.append(data)
-                except:
+                            data["id"] = data.get("ytId", f"auto_id_{len(all_records)}")
+                        all_records.append(data)
+                except Exception as e:
                     continue
-        return all_data
-    except:
+        return all_records
+    except Exception as e:
+        print("讀取資料錯誤:", e)
         return []
 
 def db_find_row(movie_id):
     try:
-        rows = sheets_request("GET", f"/values/{SHEET_NAME}!A:A")["values"]
+        rows = sheets_request("GET", f"/values/films!A:A")["values"]
         for i, row in enumerate(rows):
             if not row: continue
             try:
@@ -235,12 +201,12 @@ def db_find_row(movie_id):
     return None
 
 def db_append(record):
-    return sheets_request("POST", f"/values/{SHEET_NAME}!A1:append?valueInputOption=RAW", {
+    return sheets_request("POST", f"/values/films!A1:append?valueInputOption=RAW", {
         "values": [[json.dumps(record, ensure_ascii=False)]]
     })
 
 def db_update_row(row_num, record):
-    return sheets_request("PUT", f"/values/{SHEET_NAME}!A{row_num}?valueInputOption=RAW", {
+    return sheets_request("PUT", f"/values/films!A{row_num}?valueInputOption=RAW", {
         "values": [[json.dumps(record, ensure_ascii=False)]]
     })
 
@@ -250,7 +216,7 @@ def get_sheet_id():
         return _sheet_id_cache
     info = sheets_request("GET", "")
     for s in info.get("sheets", []):
-        if s["properties"]["title"] == SHEET_NAME:
+        if s["properties"]["title"] == "films":
             _sheet_id_cache = s["properties"]["sheetId"]
             return _sheet_id_cache
     return 0
