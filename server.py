@@ -192,8 +192,11 @@ def db_read():
                 continue
             try:
                 data = json.loads(cell)
-                # 只讀正常電影資料，壞掉的自動跳過
-                if isinstance(data, dict) and data.get("id") and data.get("title"):
+                # 只驗證必要的 title 和 ytId，不再強制 id
+                if isinstance(data, dict) and data.get("title") and data.get("ytId"):
+                    # 如果沒有 id，就用 ytId 當 id
+                    if not data.get("id"):
+                        data["id"] = data["ytId"]
                     records.append(data)
             except:
                 continue
