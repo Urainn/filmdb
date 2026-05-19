@@ -426,7 +426,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
   <!-- APP SHEETS CARD -->
   <div id="panel-sheets" class="panel">
     <div class="page-head">
-      <div><div class="page-title">APP 專用電影卡片 sheets_card</div><div class="page-sub>給手機 APP / 前端直接讀取的標準卡片格式</div></div>
+      <div><div class="page-title">APP 專用電影卡片 sheets_card</div><div class="page-sub">給手機 APP / 前端直接讀取的標準卡片格式</div></div>
     </div>
 
     <div style="max-width:600px; margin-bottom:20px">
@@ -444,60 +444,58 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div id="app-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px"></div>
   </div>
 
- <!-- SETTINGS -->
-<div id="panel-settings" class="panel">
-  <div class="page-head">
-    <div>
-      <div class="page-title">API Key 設定</div>
-      <div class="page-sub">在這裡新增多組 Gemini Key，額度用完自動切換</div>
-    </div>
-  </div>
-
-  <div class="btn-row" style="margin-top:15px">
-    <button class="btn btn-danger" onclick="batchSyncAllActors()">🚀 一鍵批次同步全庫所有電影演員</button>
-  </div>
-  <div id="batch-sync-actor-log" style="margin-top:10px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:560px;"></div>
-
-  <div style="max-width:560px">
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
-      <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">目前 Key 狀態</div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:12px">每組 Key 每天可分析約 500 部電影（免費方案）</div>
-      <div id="keys-status" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text3)">載入中...</div>
+  <!-- SETTINGS -->
+  <div id="panel-settings" class="panel">
+    <div class="page-head">
+      <div>
+        <div class="page-title">API Key 設定</div>
+        <div class="page-sub">在這裡新增多組 Gemini Key，額度用完自動切換</div>
+      </div>
     </div>
 
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px">
-      <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">新增 / 更新 Gemini API Key</div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:12px">
-        每行填一組 Key，存檔後立即生效，不需要重新部署。<br>
-        取得免費 Key：<a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--blue)">aistudio.google.com/apikey</a>
+    <div class="btn-row" style="margin-top:15px">
+      <button class="btn btn-danger" onclick="batchSyncAllActors()">🚀 一鍵批次同步全庫所有電影演員</button>
+    </div>
+    <div id="batch-sync-actor-log" style="margin-top:10px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:560px;"></div>
+
+    <div style="max-width:560px">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">目前 Key 狀態</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px">每組 Key 每天可分析約 500 部電影（免費方案）</div>
+        <div id="keys-status" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text3)">載入中...</div>
       </div>
 
-      <div class="field">
-        <label class="fl">追加單筆 Gemini API Key</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input class="fi" id="key-add-input" type="text" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1;min-width:260px">
-          <button class="btn btn-accent" onclick="addKey()">新增 Key</button>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">新增 / 更新 Gemini API Key</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px">
+          每行填一組 Key，存檔後立即生效，不需要重新部署。<br>
+          取得免費 Key：<a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--blue)">aistudio.google.com/apikey</a>
         </div>
-        <div style="font-size:10.5px;color:var(--text3);margin-top:3px">這裡會追加到現有清單，不會取代舊 Key</div>
-      </div>
 
-      <div class="field">
-        <label class="fl">Gemini API Keys（每行一組）</label>
-        <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AIzaYYYYYYYYYYYYYYYYYYYYYYY&#10;AIzaZZZZZZZZZZZZZZZZZZZZZZZ"></textarea>
-        <div style="font-size:10.5px;color:var(--text3);margin-top:3px">儲存後舊的 Key 會被取代，請確認每行都是完整的 Key</div>
-      </div>
+        <div class="field">
+          <label class="fl">追加單筆 Gemini API Key</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input class="fi" id="key-add-input" type="text" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1;min-width:260px">
+            <button class="btn btn-accent" onclick="addKey()">新增 Key</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:3px">這裡會追加到現有清單，不會取代舊 Key</div>
+        </div>
 
-      <div class="btn-row">
-        <button class="btn btn-accent" onclick="saveKeys()">儲存 Keys</button>
-        <button class="btn btn-sm" onclick="loadKeyStatus()">重新整理狀態</button>
+        <div class="field">
+          <label class="fl">Gemini API Keys（每行一組）</label>
+          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AIzaYYYYYYYYYYYYYYYYYYYYYYY&#10;AIzaZZZZZZZZZZZZZZZZZZZZZZZ"></textarea>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:3px">儲存後舊的 Key 會被取代，請確認每行都是完整的 Key</div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-accent" onclick="saveKeys()">儲存 Keys</button>
+          <button class="btn btn-sm" onclick="loadKeyStatus()">重新整理狀態</button>
+        </div>
+        <div class="sbox" id="keys-save-status" style="margin-top:10px"></div>
       </div>
-      <div class="sbox" id="keys-save-status" style="margin-top:10px"></div>
     </div>
   </div>
-</div>
 
-</main>
-</div>
 </main>
 </div>
 
@@ -846,7 +844,7 @@ async function runReanalyzeQueue(items) {
       } else {
         detailEl.textContent = `「${m.title}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
       }
-    } catch(e) {
+    } catch (e) {
       detailEl.textContent = `「${m.title}」連線錯誤：${e.message || e}，繼續下一部...`;
     }
 
@@ -983,7 +981,7 @@ async function analyze() {
         continue;
       }
       break;
-    } catch(e) {
+    } catch (e) {
       if (attempts < maxAttempts) {
         msgEl.textContent = `連線中斷，重試中（${attempts}/${maxAttempts}）...`;
         await new Promise(res => setTimeout(res, 4000));
@@ -1060,7 +1058,7 @@ async function saveEntry() {
     toast(duplicate ? '已更新：' + title : '已新增：' + title, 'ok');
     await loadDb();
     go('list', document.querySelectorAll('.nav-item')[0]);
-  } catch(e) { toast('儲存失敗：' + e.message, 'err'); }
+  } catch (e) { toast('儲存失敗：' + e.message, 'err'); }
 }
 
 function openEdit(id) {
@@ -1101,7 +1099,7 @@ async function saveEdit() {
     toast('已儲存', 'ok');
     closeEdit();
     await loadDb();
-  } catch(e) { toast('儲存失敗', 'err'); }
+  } catch (e) { toast('儲存失敗', 'err'); }
 }
 
 async function syncActorsFromTMDB() {
@@ -1807,6 +1805,9 @@ async function ytBatchAnalyze() {
   if (successCount > 0) await loadDb();
 }
 
+// =====================================================================
+// API KEY 設定功能
+// =====================================================================
 async function loadKeyStatus() {
   const el = document.getElementById('keys-status');
   if (!el) return;
@@ -1996,75 +1997,6 @@ async function loadAppRecommend() {
   const cards = await getRecommendCards(user);
   renderAppCards(cards);
 }
-
-  // ==== API KEY 設定功能 ====
-async function loadKeyStatus() {
-  let el = document.getElementById("keys-status");
-  el.innerText = "載入中...";
-  try {
-    let res = await fetch("/config/keys");
-    let j = await res.json();
-    el.innerText = j.keys.join("\n") || "尚未設定 Key";
-  } catch (e) {
-    el.innerText = "載入失敗";
-  }
-}
-
-async function saveKeys() {
-  let input = document.getElementById("keys-input");
-  let keys = input.value.split(/\n/).map(s => s.trim()).filter(Boolean);
-  let st = document.getElementById("keys-save-status");
-  st.innerText = "儲存中...";
-  try {
-    let res = await fetch("/config/keys", {
-      method: "POST",
-      body: JSON.stringify({ keys }),
-      headers: { "Content-Type": "application/json" }
-    });
-    let j = await res.json();
-    st.innerText = j.ok ? "✅ 儲存成功" : "❌ 儲存失敗";
-    loadKeyStatus();
-  } catch (e) {
-    st.innerText = "❌ 儲存失敗";
-  }
-}
-
-async function addKey() {
-  let input = document.getElementById("key-add-input");
-  let key = input.value.trim();
-  if (!key) return;
-  let st = document.getElementById("keys-save-status");
-  st.innerText = "新增中...";
-  try {
-    let res = await fetch("/config/keys/add", {
-      method: "POST",
-      body: JSON.stringify({ key }),
-      headers: { "Content-Type": "application/json" }
-    });
-    let j = await res.json();
-    st.innerText = j.ok ? "✅ 新增成功" : "❌ 新增失敗";
-    input.value = "";
-    loadKeyStatus();
-  } catch (e) {
-    st.innerText = "❌ 新增失敗";
-  }
-}
-
-// 一鍵批次同步演員
-async function batchSyncAllActors() {
-  let log = document.getElementById("batch-sync-actor-log");
-  log.innerText = "開始批次同步演員...\n";
-  try {
-    let res = await fetch("/batch/sync-actors", { method: "POST" });
-    let j = await res.json();
-    log.innerText += j.ok ? "✅ 全部演員同步完成" : "❌ 同步失敗";
-  } catch (e) {
-    log.innerText += "❌ 同步失敗\n" + e.message;
-  }
-}
-
-// 進入設定頁自動載入
-document.getElementById("panel-settings").addEventListener("show", loadKeyStatus);
 
 // =====================================================================
 // INIT
