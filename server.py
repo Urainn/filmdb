@@ -777,50 +777,179 @@ class Handler(BaseHTTPRequestHandler):
 
 
     def do_GET(self):
-        path = self.path.split("?")[0]
-        if path == "/ping":
-            self.send_json(200, {"ok": True, "model": MODEL})
-        elif path == "/db":
-            self.send_json(200, {"ok": True, "data": db_read()})
-        elif path == "/config/keys":
-            keys = get_gemini_keys()
-            masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
-            self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
-        elif path in ["/", "/index.html"]:
-            if os.path.exists("index.html"):
-                with open("index.html", "r", encoding="utf-8") as f:
-                    self.send_html(f.read())
-            else:
-                self.send_json(404, {"ok": False, "error": "index.html 不存在"})
-        else:
-            self.send_json(404, {"ok": False, "error": "not found"})
+    path = self.path.split("?")[0]
+    if path == "/ping":
+        self.send_json(200, {"ok": True, "model": MODEL})
 
+    # APP 專用：全部電影卡片
+    elif path == "/api/sheets_card":
+        movies = db_read()
+        sheets_card = []
+        for m in movies:
+            card = {
+                "id": m.get("id", ""),
+                "title": m.get("title", ""),
+                "poster": m.get("poster") or m.get("thumb", ""),
+                "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+                "genres": m.get("genres", []),
+                "moods": m.get("moods", []),
+                "actors": m.get("cast", ""),
+                "url": m.get("url", ""),
+                "ytId": m.get("ytId", "")
+            }
+            sheets_card.append(card)
+        self.send_json(200, sheets_card)
 
-    def do_POST(self):
-        path = self.path.split("?")[0]
-        print(f"  POST 收到路徑: {path}")
-        if path == "/analyze":
-            self.handle_analyze()
-        elif path == "/db":
-            self.handle_db_add()
-        elif path == "/config/keys":
-            self.handle_save_keys()
-        elif path == "/config/keys/add":
-            self.handle_add_key()
-        elif path == "/youtube/search":
-            self.handle_youtube_search()
-        elif path == "/youtube/info":
-            self.handle_youtube_info()
-        elif path == "/tmdb/search":
-            self.handle_tmdb_search()
-        elif path == "/tmdb/analyze":
-            self.handle_tmdb_analyze()
-        elif path == "/youtube/batch-analyze":
-            self.handle_batch_analyze()
-        elif path == "/ping":
-            self.send_json(200, {"ok": True})
+    elif path == "/db":
+        self.send_json(200, {"ok": True, "data": db_read()})
+    elif path == "/config/keys":
+        keys = get_gemini_keys()
+        masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
+        self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
+    elif path in ["/", "/index.html"]:
+        if os.path.exists("index.html"):
+            with open("index.html", "r", encoding="utf-8") as f:
+                self.send_html(f.read())
         else:
-            self.send_json(404, {"ok": False, "error": f"未知路徑: {path}"})
+            self.send_json(404, {"ok": False, "error": "index.html 不存在"})
+    else:
+        self.send_json(404, {"ok": False, "error": "not found"})
+
+  # 記憶存放使用者喜好（後端重啟前都有效）
+user_behavior = {}
+
+def do_POST(self):
+    path = self.path.split("?")[0]
+    body = self.read_body()
+
+    # ========== APP 喜歡 ==========
+    if path == "/api/user/like":
+        userName = body.get("userName","")
+        movieId = body.get("movieId","")
+        if not userName or not movieId:
+            self.send_json(400, {"ok":False})
+            return
+        if userName not in user_behavior:
+            user_behavior[userName] = {"like":[],"dislike":[]}
+        u = user_behavior[userName]
+        if movieId not in u["like"]:
+            u["like"].append(movieId)
+        if movieId in u["dislike"]:
+            u["dislike"].remove(movieId)
+        self.send_json(200, {"ok":True})
+        return
+
+    # ========== APP 不喜歡 ==========
+    if path == "/api/user/dislike":
+        userName = body.get("userName","")
+        movieId = body.get("movieId","")
+        if not userName or not movieId:
+            self.send_json(400, {"ok":False})
+            return
+        if userName not in user_behavior:
+            user_behavior[userName] = {"like":[],"dislike":[]}
+        u = user_behavior[userName]
+        if movieId not in u["dislike"]:
+            u["dislike"].append(movieId)
+        if movieId in u["like"]:
+            u["like"].remove(movieId)
+        self.send_json(200, {"ok":True})
+        return
+
+    # ========== APP 個人化推薦 ==========
+    if path == "/api/sheets_card/recommend":
+        userName = body.get("userName","")
+        limit = int(body.get("limit",20))
+        if not userName or userName not in user_behavior:
+            # 無使用者就回隨機前幾部
+            allCards = []
+            movies = db_read()
+            for m in movies:
+                allCards.append({
+                    "id": m.get("id", ""),
+                    "title": m.get("title", ""),
+                    "poster": m.get("poster") or m.get("thumb", ""),
+                    "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+                    "genres": m.get("genres", []),
+                    "moods": m.get("moods", []),
+                    "actors": m.get("cast", ""),
+                    "url": m.get("url", ""),
+                    "ytId": m.get("ytId", "")
+                })
+            self.send_json(200, allCards[:limit])
+            return
+
+        u = user_behavior[userName]
+        movies = db_read()
+
+        # 演算分數
+        def getScore(m):
+            score = 0
+            if m["id"] in u["like"]:
+                score += 50
+            if m["id"] in u["dislike"]:
+                score -= 100
+            # 標籤加權
+            for g in m.get("genres",[]):
+                if any(gg in u["like"] for gg in g): score +=3
+            for s in m.get("scenes",[]):
+                if any(ss in u["like"] for ss in s): score +=2
+            return score
+
+        # 轉卡片 + 排序
+        listCards = []
+        for m in movies:
+            card = {
+                "id": m.get("id", ""),
+                "title": m.get("title", ""),
+                "poster": m.get("poster") or m.get("thumb", ""),
+                "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+                "genres": m.get("genres", []),
+                "moods": m.get("moods", []),
+                "actors": m.get("cast", ""),
+                "url": m.get("url", ""),
+                "ytId": m.get("ytId", ""),
+                "score": getScore(m)
+            }
+            # 隱藏已不喜歡
+            if card["score"] > -50:
+                listCards.append(card)
+
+        # 高分在前
+        listCards.sort(key=lambda x:x["score"], reverse=True)
+        res = listCards[:limit]
+        # 拿掉分數不給 APP
+        for r in res:
+            r.pop("score",None)
+
+        self.send_json(200, res)
+        return
+
+    # 原本舊的 POST 路由保留
+    path = self.path.split("?")[0]
+    print(f"  POST 收到路徑: {path}")
+    if path == "/analyze":
+        self.handle_analyze()
+    elif path == "/db":
+        self.handle_db_add()
+    elif path == "/config/keys":
+        self.handle_save_keys()
+    elif path == "/config/keys/add":
+        self.handle_add_key()
+    elif path == "/youtube/search":
+        self.handle_youtube_search()
+    elif path == "/youtube/info":
+        self.handle_youtube_info()
+    elif path == "/tmdb/search":
+        self.handle_tmdb_search()
+    elif path == "/tmdb/analyze":
+        self.handle_tmdb_analyze()
+    elif path == "/youtube/batch-analyze":
+        self.handle_batch_analyze()
+    elif path == "/ping":
+        self.send_json(200, {"ok": True})
+    else:
+        self.send_json(404, {"ok": False, "error": f"未知路徑: {path}"})
 
 
     def do_DELETE(self):
