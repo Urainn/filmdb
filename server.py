@@ -17,7 +17,7 @@ import base64
 import sys
 
 # ========== 已內嵌可用API金鑰 直接使用 ==========
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyB8eK5f9xQ2rT7mP1sN4wV6bA3dC7zX9qE1")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyD-ixp5V8HfFkHf8Y7k9Z0X1a2b3c4d5e6f")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
 SHEET_NAME = os.environ.get("SHEET_NAME", "films")
@@ -928,4 +928,71 @@ class Handler(BaseHTTPRequestHandler):
                         params["year"] = year
                     else:
                         params["first_air_date_year"] = year
-                data = tm
+                data = tmdb_request(f"/search/{media_type}", params)
+            else:
+                data = tmdb_request(f"/discover/{media_type}", {
+                    "page": page,
+                    "include_adult": "false",
+                    "sort_by": "popularity.desc"
+                })
+            genre_map = tmdb_genres(media_type)
+            existing = {m.get("ytId") for m in db_read()}
+            results = []
+            for item in data.get("results", [])[:max_results]:
+                res = tmdb_to_result(item, media_type, genre_map, existing)
+                if res["ytId"] not in exclude_ids:
+                    results.append(res)
+            self.send_json(200, {
+                "ok": True,
+                "data": results,
+                "page": data.get("page", 1),
+                "total_pages": data.get("total_pages", 1),
+                "total_results": data.get("total_results", 0),
+            })
+        except Exception as e:
+            self.send_json(200, {"ok": False, "error": str(e)})
+    def handle_tmdb_analyze(self):
+        body = self.read_body()
+        item = body
+        if not item:
+            self.send_json(400, {"ok": False, "error": "缺少電影資料"})
+            return
+        self.send_json(200, call_gemini_tmdb(item))
+    def handle_batch_analyze(self):
+        body = self.read_body()
+        urls = body.get("urls", [])
+        if not isinstance(urls, list) or len(urls) == 0:
+            self.send_json(400, {"ok": False, "error": "請提供 urls 陣列"})
+            return
+        def batch_task():
+            results = []
+            for url in urls:
+                res = call_gemini_analyze(url.strip())
+                results.append({"url": url, "result": res})
+                time.sleep(1)
+            print("批次分析完成")
+        thread = threading.Thread(target=batch_task, daemon=True)
+        thread.start()
+        self.send_json(200, {"ok": True, "message": f"已開始批次分析 {len(urls)} 部影片"})
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+def main():
+    try:
+        ensure_sheet()
+    except Exception as e:
+        print(f"警告：試圖建立試算表分頁失敗: {e}")
+    server = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"=== FilmDB 伺服器啟動 ===")
+    print(f"本機位址：http://127.0.0.1:{PORT}")
+    print(f"已內嵌 API 金鑰，可直接使用")
+    print(f"按 Ctrl+C 停止伺服器")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print(f"\n伺服器已停止")
+        server.server_close()
+
+if __name__ == "__main__":
+    main()
