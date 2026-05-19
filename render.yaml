@@ -10,7 +10,7 @@ services:
       - key: SHEETS_CREDS
         sync: false
       - key: SPREADSHEET_ID
-        value: 1sRXiN_W8oshYIZTaDza3A-
+        value: 1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw
       - key: TMDB_API_KEY
         value: 2dca21d2886540666435864f88656876
       - key: YOUTUBE_API_KEY
