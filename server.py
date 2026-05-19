@@ -199,21 +199,24 @@ def get_next_key(failed_key=None):
 # ===================== 讀取資料（防崩潰、自動補 id） =====================
 def db_read():
     try:
-        res = sheets_request("GET", f"/values/{SHEET_NAME}!A:A")
-        rows = res.get("values", [])
-        records = []
-        for row in rows:
-            if not row or not row[0].strip():
-                continue
-            try:
-                data = json.loads(row[0].strip())
-                if isinstance(data, dict):
-                    if not data.get("id"):
-                        data["id"] = data.get("ytId", f"id_{len(records)}")
-                    records.append(data)
-            except:
-                continue
-        return records
+        info = sheets_request("GET", "")
+        all_data = []
+        for sheet in info.get("sheets", []):
+            name = sheet["properties"]["title"]
+            res = sheets_request("GET", f"/values/{name}!A:A")
+            rows = res.get("values", [])
+            for row in rows:
+                if not row or not row[0].strip():
+                    continue
+                try:
+                    data = json.loads(row[0].strip())
+                    if isinstance(data, dict):
+                        if not data.get("id"):
+                            data["id"] = data.get("ytId", f"id_{len(all_data)}")
+                        all_data.append(data)
+                except:
+                    continue
+        return all_data
     except:
         return []
 
