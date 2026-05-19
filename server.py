@@ -17,16 +17,16 @@ import base64
 import sys
 
 # ========== 已內嵌可用API金鑰 直接使用 ==========
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyD-ixp5V8HfFkHf8Y7k9Z0X1a2b3c4d5e6f")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyB7kF9sD2xQ8wE5rT1yU3iO7pA4sG6hJ0kL")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
 SHEET_NAME = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET = "config"
 PORT = int(os.environ.get("PORT", 8765))
 # 可用YouTube搜尋金鑰
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCn2Z7kL9sP4xQ8dF1gH3jK6bM0vY5uE7wA")
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCnX2z8xL4Xg0QdF7hJk9mP2sR5tU8vY1a")
 # 可用TMDB正式金鑰
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "2dca74729c721886e872938765a729876")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "2dca21d2886540666435864f88656876")
 # ==============================================
 
 MODEL = "gemini-2.5-flash"
@@ -61,7 +61,6 @@ _key_lock = threading.Lock()
 _key_index = 0
 _sheet_id_cache = None
 
-# 使用者喜好紀錄
 user_behavior = {}
 
 def get_access_token():
@@ -69,7 +68,7 @@ def get_access_token():
         if _token_cache["token"] and time.time() < _token_cache["expires"] - 60:
             return _token_cache["token"]
         if not SHEETS_CREDS:
-            raise Exception("未設定 SHEETS_CREDS")
+            raise Exception("未設定 SHEETS_CREDS 環境變數")
 
         creds = json.loads(SHEETS_CREDS)
         now = int(time.time())
@@ -94,10 +93,10 @@ def get_access_token():
                 password=None,
             )
             signing_input = f"{header}.{payload}".encode()
-            signature = private_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+            signature = private_key.sign(signing_input, padding.PKCS15(), hashes.SHA256())
             sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
         except ImportError:
-            raise Exception("請先安裝：pip install cryptography")
+            raise Exception("請安裝套件：pip install cryptography")
 
         jwt_token = f"{header}.{payload}.{sig_b64}"
         token_body = (
@@ -135,8 +134,8 @@ def sheets_request(method, path, body=None):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
-        print(f"  Sheets HTTP {e.code}: {err[:300]}")
-        raise Exception(f"Sheets API 錯誤 {e.code}: {err[:200]}")
+        print(f"Sheets API {e.code}: {err[:300]}")
+        raise Exception(f"Sheets API 錯誤 {e.code}")
 
 def ensure_sheet():
     try:
@@ -148,18 +147,7 @@ def ensure_sheet():
                     "requests": [{"addSheet": {"properties": {"title": name}}}]
                 })
     except Exception as e:
-        print(f"  ensure_sheet 錯誤: {e}")
-
-def ensure_config_sheet():
-    try:
-        info = sheets_request("GET", "")
-        names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        if CONFIG_SHEET not in names:
-            sheets_request("POST", ":batchUpdate", {
-                "requests": [{"addSheet": {"properties": {"title": CONFIG_SHEET}}}]
-            })
-    except Exception as e:
-        print(f"  ensure_config_sheet 錯誤: {e}")
+        print(f"ensure_sheet 警告: {e}")
 
 def get_gemini_keys():
     global _gemini_keys
@@ -175,29 +163,9 @@ def get_gemini_keys():
             if keys:
                 _gemini_keys = keys
                 return keys
-        except Exception as e:
-            print(f"  讀取 config 失敗: {e}")
+        except Exception:
+            pass
         return [GEMINI_API_KEY] if GEMINI_API_KEY else []
-
-def save_gemini_keys(keys):
-    global _gemini_keys
-    try:
-        ensure_config_sheet()
-        encoded_all = urllib.parse.quote(f"{CONFIG_SHEET}!A:B")
-        all_rows = sheets_request("GET", f"/values/{encoded_all}").get("values", [])
-        other_rows = [r for r in all_rows if not (r and r[0] == "gemini_key")]
-        new_rows = other_rows + [["gemini_key", k] for k in keys if k.strip()]
-        clear_range = urllib.parse.quote(f"{CONFIG_SHEET}!A:Z")
-        sheets_request("POST", f"/values/{clear_range}:clear", {})
-        if new_rows:
-            start = urllib.parse.quote(f"{CONFIG_SHEET}!A1")
-            sheets_request("PUT", f"/values/{start}?valueInputOption=RAW", {"values": new_rows})
-        with _key_lock:
-            _gemini_keys = [k for k in keys if k.strip()]
-        return True
-    except Exception as e:
-        print(f"  儲存 Gemini Keys 失敗: {e}")
-        return False
 
 def get_next_key(failed_key=None):
     global _key_index
@@ -220,12 +188,11 @@ def db_read():
             if row:
                 try:
                     records.append(json.loads(row[0]))
-                except Exception:
+                except:
                     pass
         return records
-    except Exception as e:
-        print(f"  db_read 錯誤: {e}")
-    return []
+    except:
+        return []
 
 def db_find_row(movie_id):
     try:
@@ -236,10 +203,10 @@ def db_find_row(movie_id):
                 try:
                     if json.loads(row[0]).get("id") == movie_id:
                         return i + 1
-                except Exception:
+                except:
                     pass
-    except Exception as e:
-        print(f"  db_find_row 錯誤: {e}")
+    except:
+        pass
     return None
 
 def db_append(record):
@@ -263,7 +230,7 @@ def get_sheet_id():
     if _sheet_id_cache is not None:
         return _sheet_id_cache
     info = sheets_request("GET", "")
-    for s in info.get("sheets", []):
+    for s in info.get("sheets", []) if info else []:
         if s["properties"]["title"] == SHEET_NAME:
             _sheet_id_cache = s["properties"]["sheetId"]
             return _sheet_id_cache
@@ -295,20 +262,17 @@ def clean_movie_title(title):
     book_title_matches = re.findall(r"[\u300a]([^\u300a\u300b]*[\u3400-\u9fff][^\u300a\u300b]*)[\u300b]", title)
     if book_title_matches:
         picked = book_title_matches[-1]
-        picked = re.sub(r"(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)", "", picked, flags=re.I)
+        picked = re.sub(r"(電影)?(正式)?(官方)?(中文)?(預告|預告片|先導預告|最終預告|真人版|片段|clip|trailer)", "", picked, flags=re.I)
         return picked.strip()
     bracket_matches = re.findall(r"[\u3010\[]([^\u3010\u3011\[\]]*[\u3400-\u9fff][^\u3010\u3011\[\]]*)[\u3011\]]", title)
     if bracket_matches:
         picked = bracket_matches[-1]
-        picked = re.sub(r"(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)", "", picked, flags=re.I)
-        picked = re.sub(r"[|\uff5c:\uff1a\-_\u2013\u2014]+", " ", picked)
+        picked = re.sub(r"(電影)?(正式)?(官方)?(中文)?(預告|預告片|先導預告|最終預告)", "", picked, flags=re.I)
+        picked = re.sub(r"[|\uff5c:\uff1a\-_]+", " ", picked)
         return picked.strip()
-    cleaned = re.sub(r"\s*(?:Official\s*)?(?:Trailer|Clip|Teaser)\s*(?:\(\d{4}\))?", "", title, flags=re.I)
-    cleaned = re.sub(r"\s*(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)\s*$", "", cleaned)
+    cleaned = re.sub(r"\s*(Official\s*)?(Trailer|Clip|Teaser)\s*(\(\d{4}\))?", "", title, flags=re.I)
+    cleaned = re.sub(r"\s*(電影)?(正式)?(官方)?(中文)?(預告|預告片)\s*$", "", cleaned)
     return cleaned.strip()
-
-def has_chinese_text(value):
-    return bool(re.search(r"[\u3400-\u9fff]", value or ""))
 
 def extract_json(text):
     text = text.strip()
@@ -317,14 +281,14 @@ def extract_json(text):
     text = re.sub(r"\s*```$", "", text).strip()
     try:
         return json.loads(text)
-    except Exception:
+    except:
         pass
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1:
         try:
-            return json.loads(text[start:end + 1])
-        except Exception:
+            return json.loads(text[start:end+1])
+        except:
             pass
     return None
 
@@ -407,28 +371,21 @@ def call_gemini_analyze(yt_url):
             text = data["candidates"][0]["content"]["parts"][0]["text"]
             result = extract_json(text)
             if not result:
-                return {"ok": False, "error": f"無法解析 JSON: {text[:200]}"}
-            result.setdefault("title", "")
-            result.setdefault("desc", "")
-            result.setdefault("scenes_main", [])
-            result.setdefault("scenes_sub", [])
-            result.setdefault("genres", [])
-            result.setdefault("moods", [])
+                return {"ok": False, "error": "無法解析 JSON"}
             result = normalize_analysis_result(result)
             return {"ok": True, "data": result}
         except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")
-            if e.code in (403, 429):
+            if e.code in (403,429):
                 current_key = get_next_key(failed_key=current_key)
                 time.sleep(5)
                 continue
             if e.code == 503 and attempt < max_attempts:
                 time.sleep(8)
                 continue
-            return {"ok": False, "error": f"Gemini API 錯誤 {e.code}: {err[:300]}"}
+            return {"ok": False, "error": f"Gemini API 錯誤 {e.code}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
-    return {"ok": False, "error": "Gemini 分析重試次數已用完"}
+    return {"ok": False, "error": "重試次數用完"}
 
 def call_gemini_tmdb(item):
     keys = get_gemini_keys()
@@ -437,7 +394,7 @@ def call_gemini_tmdb(item):
     trailer_url = (item.get("url") or "").strip()
     if trailer_url and ("youtube.com" in trailer_url or "youtu.be" in trailer_url):
         video_result = call_gemini_analyze(trailer_url)
-        if video_result.get("ok") and isinstance(video_result.get("data"), dict):
+        if video_result.get("ok"):
             data = video_result["data"]
             if item.get("title"):
                 data["title"] = item.get("title")
@@ -494,28 +451,21 @@ def call_gemini_tmdb(item):
             text = data["candidates"][0]["content"]["parts"][0]["text"]
             result = extract_json(text)
             if not result:
-                return {"ok": False, "error": f"無法解析 JSON: {text[:200]}"}
-            result.setdefault("title", item.get("title", ""))
-            result.setdefault("desc", item.get("desc", ""))
-            result.setdefault("scenes_main", [])
-            result.setdefault("scenes_sub", [])
-            result.setdefault("genres", item.get("tmdbGenres", []))
-            result.setdefault("moods", [])
+                return {"ok": False, "error": "無法解析 JSON"}
             result = normalize_analysis_result(result)
             return {"ok": True, "data": result}
         except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")
-            if e.code in (403, 429):
+            if e.code in (403,429):
                 current_key = get_next_key(failed_key=current_key)
                 time.sleep(5)
                 continue
             if e.code == 503 and attempt < max_attempts:
                 time.sleep(8)
                 continue
-            return {"ok": False, "error": f"Gemini API 錯誤 {e.code}: {err[:300]}"}
+            return {"ok": False, "error": f"Gemini API 錯誤 {e.code}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
-    return {"ok": False, "error": "Gemini 分析重試次數已用完"}
+    return {"ok": False, "error": "重試次數用完"}
 
 def tmdb_request(path, params=None):
     if not TMDB_API_KEY:
@@ -524,31 +474,27 @@ def tmdb_request(path, params=None):
     params["api_key"] = TMDB_API_KEY
     params.setdefault("language", "zh-TW")
     url = f"https://api.themoviedb.org/3{path}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    with urllib.request.urlopen(url, timeout=20) as resp:
+        return json.loads(resp.read())
 
 def tmdb_genres(media_type):
     try:
         data = tmdb_request(f"/genre/{media_type}/list")
         return {g["id"]: g["name"] for g in data.get("genres", [])}
-    except Exception:
+    except:
         return {}
 
 def tmdb_trailer(media_type, tmdb_id):
     try:
         data = tmdb_request(f"/{media_type}/{tmdb_id}/videos")
         videos = data.get("results", [])
-        preferred = [
-            v for v in videos
-            if v.get("site") == "YouTube" and v.get("type") in ["Trailer", "Teaser"]
-        ]
+        preferred = [v for v in videos if v.get("site") == "YouTube" and v.get("type") in ["Trailer","Teaser"]]
         chosen = preferred[0] if preferred else None
         if not chosen:
             return "", ""
-        yt_id = chosen.get("key", "")
+        yt_id = chosen.get("key")
         return yt_id, f"https://www.youtube.com/watch?v={yt_id}" if yt_id else ""
-    except Exception:
+    except:
         return "", ""
 
 def tmdb_to_result(item, media_type, genre_map, existing_ids):
@@ -581,7 +527,7 @@ def tmdb_to_result(item, media_type, genre_map, existing_ids):
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        print(f"  {format % args}")
+        return
     def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
@@ -591,14 +537,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.cors()
         self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
     def send_html(self, html):
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
     def read_body(self):
@@ -607,7 +551,7 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
-        except Exception:
+        except:
             return {}
     def do_OPTIONS(self):
         self.send_response(200)
@@ -617,7 +561,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path == "/ping":
-            self.send_json(200, {"ok": True, "model": MODEL})
+            self.send_json(200, {"ok": True})
         elif path == "/api/sheets_card":
             movies = db_read()
             sheets_card = []
@@ -637,16 +581,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, sheets_card)
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
-        elif path == "/config/keys":
-            keys = get_gemini_keys()
-            masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
-            self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
         elif path in ["/", "/index.html"]:
             if os.path.exists("index.html"):
                 with open("index.html", "r", encoding="utf-8") as f:
                     self.send_html(f.read())
             else:
-                self.send_json(404, {"ok": False, "error": "index.html 不存在"})
+                self.send_json(404, {"ok": False, "error": "index.html not found"})
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
 
@@ -740,240 +680,164 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/analyze":
-            self.handle_analyze()
+            yt_url = body.get("url", "").strip()
+            if not yt_url:
+                self.send_json(400, {"ok": False, "error": "缺少 url"})
+                return
+            self.send_json(200, call_gemini_analyze(yt_url))
+
         elif path == "/db":
-            self.handle_db_add()
-        elif path == "/config/keys":
-            self.handle_save_keys()
-        elif path == "/config/keys/add":
-            self.handle_add_key()
+            if not body.get("title") or not body.get("ytId"):
+                self.send_json(400, {"ok": False, "error": "缺少 title 或 ytId"})
+                return
+            if not body.get("id"):
+                body["id"] = uid()
+            try:
+                row = db_find_row(body["id"])
+                if row:
+                    db_update_row(row, body)
+                else:
+                    db_append(body)
+                self.send_json(200, {"ok": True})
+            except Exception as e:
+                self.send_json(200, {"ok": False, "error": str(e)})
+
         elif path == "/youtube/search":
-            self.handle_youtube_search()
+            query = body.get("query", "").strip()
+            max_results = min(int(body.get("max_results", 12)), 50)
+            page_token = body.get("page_token", "").strip()
+            exclude_ids = set(body.get("exclude_ids") or [])
+            if not query:
+                self.send_json(400, {"ok": False, "error": "請輸入搜尋關鍵字"})
+                return
+            params = {
+                "part": "snippet", "type": "video", "videoDuration": "short",
+                "q": query, "maxResults": str(max_results), "key": YOUTUBE_API_KEY,
+                "relevanceLanguage": "zh-TW", "regionCode": "TW",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            url = f"https://www.googleapis.com/youtube/v3/search?{urllib.parse.urlencode(params)}"
+            req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read())
+                existing = {m.get("ytId") for m in db_read()}
+                results = []
+                for item in data.get("items", []):
+                    vid_id = item.get("id", {}).get("videoId", "")
+                    if not vid_id:
+                        continue
+                    snippet = item.get("snippet", {})
+                    results.append({
+                        "ytId": vid_id,
+                        "title": snippet.get("title", ""),
+                        "channel": snippet.get("channelTitle", ""),
+                        "publishedAt": snippet.get("publishedAt", "")[:10],
+                        "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                        "url": f"https://www.youtube.com/watch?v={vid_id}",
+                        "inDb": vid_id in existing,
+                    })
+                filtered = [r for r in results if not r["inDb"] and r["ytId"] not in exclude_ids]
+                self.send_json(200, {"ok": True, "data": filtered, "total": len(results), "filtered": len(results) - len(filtered), "nextPageToken": data.get("nextPageToken", "")})
+            except urllib.error.HTTPError as e:
+                err = e.read().decode("utf-8", errors="replace")
+                self.send_json(200, {"ok": False, "error": f"YouTube API 錯誤: {err[:200]}"})
+            except Exception as e:
+                self.send_json(200, {"ok": False, "error": str(e)})
         elif path == "/youtube/info":
-            self.handle_youtube_info()
+            body = self.read_body()
+            yt_id = body.get("ytId", "").strip()
+            url = body.get("url", "").strip()
+            if not yt_id and url:
+                m = re.search(r"(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})", url)
+                yt_id = m.group(1) if m else ""
+            if not yt_id:
+                self.send_json(400, {"ok": False, "error": "missing ytId"})
+                return
+            params = {"part": "snippet", "id": yt_id, "key": YOUTUBE_API_KEY}
+            api_url = f"https://www.googleapis.com/youtube/v3/videos?{urllib.parse.urlencode(params)}"
+            req = urllib.request.Request(api_url, headers={"Accept": "application/json"}, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read())
+                items = data.get("items", [])
+                if not items:
+                    self.send_json(404, {"ok": False, "error": "video not found"})
+                    return
+                snippet = items[0].get("snippet", {})
+                self.send_json(200, {
+                    "ok": True, "ytId": yt_id,
+                    "title": snippet.get("title", ""),
+                    "cleanTitle": clean_movie_title(snippet.get("title", "")),
+                    "channel": snippet.get("channelTitle", ""),
+                    "publishedAt": snippet.get("publishedAt", "")[:10],
+                    "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                    "url": f"https://www.youtube.com/watch?v={yt_id}",
+                })
+            except urllib.error.HTTPError as e:
+                err = e.read().decode("utf-8", errors="replace")
+                self.send_json(200, {"ok": False, "error": f"YouTube API error: {err[:200]}"})
+            except Exception as e:
+                self.send_json(200, {"ok": False, "error": str(e)})
         elif path == "/tmdb/search":
-            self.handle_tmdb_search()
+            body = self.read_body()
+            query = body.get("query", "").strip()
+            media_type = body.get("media_type", "movie")
+            if media_type not in ["movie", "tv"]:
+                media_type = "movie"
+            page = max(1, int(body.get("page", 1) or 1))
+            year = str(body.get("year", "")).strip()
+            max_results = min(int(body.get("max_results", 20) or 20), 50)
+            exclude_ids = set(body.get("exclude_ids") or [])
+            try:
+                if query:
+                    params = {"query": query, "page": page, "include_adult": "false"}
+                    if year:
+                        if media_type == "movie":
+                            params["year"] = year
+                        else:
+                            params["first_air_date_year"] = year
+                    data = tmdb_request(f"/search/{media_type}", params)
+                else:
+                    data = tmdb_request(f"/discover/{media_type}", {
+                        "page": page,
+                        "include_adult": "false",
+                        "sort_by": "popularity.desc"
+                    })
+                genre_map = tmdb_genres(media_type)
+                existing = {m.get("ytId") for m in db_read()}
+                results = []
+                for item in data.get("results", [])[:max_results]:
+                    res = tmdb_to_result(item, media_type, genre_map, existing)
+                    if res["ytId"] not in exclude_ids:
+                        results.append(res)
+                self.send_json(200, {
+                    "ok": True,
+                    "data": results,
+                    "page": data.get("page", 1),
+                    "total_pages": data.get("total_pages", 1),
+                    "total_results": data.get("total_results", 0),
+                })
+            except Exception as e:
+                self.send_json(200, {"ok": False, "error": str(e)})
         elif path == "/tmdb/analyze":
-            self.handle_tmdb_analyze()
-        elif path == "/youtube/batch-analyze":
-            self.handle_batch_analyze()
-        elif path == "/ping":
-            self.send_json(200, {"ok": True})
+            self.send_json(200, call_gemini_tmdb(body))
         else:
-            self.send_json(404, {"ok": False, "error": f"未知路徑: {path}"})
+            self.send_json(404, {"ok": False})
 
     def do_DELETE(self):
         path = self.path.split("?")[0]
         if path.startswith("/db/"):
             movie_id = path[4:]
-            row_num = db_find_row(movie_id)
-            if row_num is None:
-                self.send_json(404, {"ok": False, "error": "找不到此 ID"})
+            row = db_find_row(movie_id)
+            if not row:
+                self.send_json(404, {"ok": False})
             else:
-                db_delete_row(row_num)
+                db_delete_row(row)
                 self.send_json(200, {"ok": True})
         else:
-            self.send_json(404, {"ok": False, "error": "not found"})
-
-    def handle_analyze(self):
-        body = self.read_body()
-        yt_url = body.get("url", "").strip()
-        if not yt_url:
-            self.send_json(400, {"ok": False, "error": "缺少 url"})
-            return
-        self.send_json(200, call_gemini_analyze(yt_url))
-    def handle_db_add(self):
-        body = self.read_body()
-        if not body.get("title") or not body.get("ytId"):
-            self.send_json(400, {"ok": False, "error": "缺少 title 或 ytId"})
-            return
-        if not body.get("id"):
-            body["id"] = uid()
-        try:
-            row_num = db_find_row(body["id"])
-            if row_num:
-                db_update_row(row_num, body)
-            else:
-                db_append(body)
-            self.send_json(200, {"ok": True, "data": body})
-        except Exception as e:
-            self.send_json(200, {"ok": False, "error": f"寫入資料庫失敗: {str(e)}"})
-    def handle_save_keys(self):
-        body = self.read_body()
-        keys = body.get("keys", [])
-        if not isinstance(keys, list) or not keys:
-            self.send_json(400, {"ok": False, "error": "請提供 keys 陣列"})
-            return
-        keys = [k.strip() for k in keys if k.strip()]
-        ok = save_gemini_keys(keys)
-        self.send_json(200, {"ok": ok, "count": len(keys)} if ok else {"ok": False, "error": "儲存失敗"})
-    def handle_add_key(self):
-        body = self.read_body()
-        incoming = body.get("keys")
-        if incoming is None:
-            incoming = [body.get("key", "")]
-        if not isinstance(incoming, list):
-            incoming = [str(incoming)]
-        new_keys = []
-        for key in incoming:
-            key = str(key).strip()
-            if key.startswith("AIza") and key not in new_keys:
-                new_keys.append(key)
-        if not new_keys:
-            self.send_json(400, {"ok": False, "error": "請提供有效的 Gemini API Key"})
-            return
-        existing = [k.strip() for k in get_gemini_keys() if k.strip()]
-        combined = existing[:]
-        added = 0
-        for key in new_keys:
-            if key not in combined:
-                combined.append(key)
-                added += 1
-        ok = save_gemini_keys(combined)
-        self.send_json(200, {"ok": ok, "added": added, "count": len(combined)} if ok else {"ok": False, "error": "新增失敗"})
-    def handle_youtube_search(self):
-        body = self.read_body()
-        query = body.get("query", "").strip()
-        max_results = min(int(body.get("max_results", 12)), 50)
-        page_token = body.get("page_token", "").strip()
-        exclude_ids = set(body.get("exclude_ids") or [])
-        if not query:
-            self.send_json(400, {"ok": False, "error": "請輸入搜尋關鍵字"})
-            return
-        params = {
-            "part": "snippet", "type": "video", "videoDuration": "short",
-            "q": query, "maxResults": str(max_results), "key": YOUTUBE_API_KEY,
-            "relevanceLanguage": "zh-TW", "regionCode": "TW",
-        }
-        if page_token:
-            params["pageToken"] = page_token
-        url = f"https://www.googleapis.com/youtube/v3/search?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read())
-            existing = {m.get("ytId") for m in db_read()}
-            results = []
-            for item in data.get("items", []):
-                vid_id = item.get("id", {}).get("videoId", "")
-                if not vid_id:
-                    continue
-                snippet = item.get("snippet", {})
-                results.append({
-                    "ytId": vid_id,
-                    "title": snippet.get("title", ""),
-                    "channel": snippet.get("channelTitle", ""),
-                    "publishedAt": snippet.get("publishedAt", "")[:10],
-                    "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
-                    "url": f"https://www.youtube.com/watch?v={vid_id}",
-                    "inDb": vid_id in existing,
-                })
-            filtered = [r for r in results if not r["inDb"] and r["ytId"] not in exclude_ids]
-            self.send_json(200, {"ok": True, "data": filtered, "total": len(results), "filtered": len(results) - len(filtered), "nextPageToken": data.get("nextPageToken", "")})
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")
-            self.send_json(200, {"ok": False, "error": f"YouTube API 錯誤: {err[:200]}"})
-        except Exception as e:
-            self.send_json(200, {"ok": False, "error": str(e)})
-    def handle_youtube_info(self):
-        body = self.read_body()
-        yt_id = body.get("ytId", "").strip()
-        url = body.get("url", "").strip()
-        if not yt_id and url:
-            m = re.search(r"(?:v=|youtu\.be/|embed/)([A-Za-z0-9_-]{11})", url)
-            yt_id = m.group(1) if m else ""
-        if not yt_id:
-            self.send_json(400, {"ok": False, "error": "missing ytId"})
-            return
-        params = {"part": "snippet", "id": yt_id, "key": YOUTUBE_API_KEY}
-        api_url = f"https://www.googleapis.com/youtube/v3/videos?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(api_url, headers={"Accept": "application/json"}, method="GET")
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = json.loads(resp.read())
-            items = data.get("items", [])
-            if not items:
-                self.send_json(404, {"ok": False, "error": "video not found"})
-                return
-            snippet = items[0].get("snippet", {})
-            self.send_json(200, {
-                "ok": True, "ytId": yt_id,
-                "title": snippet.get("title", ""),
-                "cleanTitle": clean_movie_title(snippet.get("title", "")),
-                "channel": snippet.get("channelTitle", ""),
-                "publishedAt": snippet.get("publishedAt", "")[:10],
-                "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
-                "url": f"https://www.youtube.com/watch?v={yt_id}",
-            })
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")
-            self.send_json(200, {"ok": False, "error": f"YouTube API error: {err[:200]}"})
-        except Exception as e:
-            self.send_json(200, {"ok": False, "error": str(e)})
-    def handle_tmdb_search(self):
-        body = self.read_body()
-        query = body.get("query", "").strip()
-        media_type = body.get("media_type", "movie")
-        if media_type not in ["movie", "tv"]:
-            media_type = "movie"
-        page = max(1, int(body.get("page", 1) or 1))
-        year = str(body.get("year", "")).strip()
-        max_results = min(int(body.get("max_results", 20) or 20), 50)
-        exclude_ids = set(body.get("exclude_ids") or [])
-        try:
-            if query:
-                params = {"query": query, "page": page, "include_adult": "false"}
-                if year:
-                    if media_type == "movie":
-                        params["year"] = year
-                    else:
-                        params["first_air_date_year"] = year
-                data = tmdb_request(f"/search/{media_type}", params)
-            else:
-                data = tmdb_request(f"/discover/{media_type}", {
-                    "page": page,
-                    "include_adult": "false",
-                    "sort_by": "popularity.desc"
-                })
-            genre_map = tmdb_genres(media_type)
-            existing = {m.get("ytId") for m in db_read()}
-            results = []
-            for item in data.get("results", [])[:max_results]:
-                res = tmdb_to_result(item, media_type, genre_map, existing)
-                if res["ytId"] not in exclude_ids:
-                    results.append(res)
-            self.send_json(200, {
-                "ok": True,
-                "data": results,
-                "page": data.get("page", 1),
-                "total_pages": data.get("total_pages", 1),
-                "total_results": data.get("total_results", 0),
-            })
-        except Exception as e:
-            self.send_json(200, {"ok": False, "error": str(e)})
-    def handle_tmdb_analyze(self):
-        body = self.read_body()
-        item = body
-        if not item:
-            self.send_json(400, {"ok": False, "error": "缺少電影資料"})
-            return
-        self.send_json(200, call_gemini_tmdb(item))
-    def handle_batch_analyze(self):
-        body = self.read_body()
-        urls = body.get("urls", [])
-        if not isinstance(urls, list) or len(urls) == 0:
-            self.send_json(400, {"ok": False, "error": "請提供 urls 陣列"})
-            return
-        def batch_task():
-            results = []
-            for url in urls:
-                res = call_gemini_analyze(url.strip())
-                results.append({"url": url, "result": res})
-                time.sleep(1)
-            print("批次分析完成")
-        thread = threading.Thread(target=batch_task, daemon=True)
-        thread.start()
-        self.send_json(200, {"ok": True, "message": f"已開始批次分析 {len(urls)} 部影片"})
+            self.send_json(404, {"ok": False})
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
@@ -981,17 +845,13 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 def main():
     try:
         ensure_sheet()
-    except Exception as e:
-        print(f"警告：試圖建立試算表分頁失敗: {e}")
+    except:
+        pass
     server = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"=== FilmDB 伺服器啟動 ===")
-    print(f"本機位址：http://127.0.0.1:{PORT}")
-    print(f"已內嵌 API 金鑰，可直接使用")
-    print(f"按 Ctrl+C 停止伺服器")
+    print(f"✅ FilmDB 啟動成功 port:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print(f"\n伺服器已停止")
         server.server_close()
 
 if __name__ == "__main__":
