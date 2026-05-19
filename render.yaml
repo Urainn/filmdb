@@ -6,13 +6,15 @@ services:
     startCommand: python server.py
     envVars:
       - key: GEMINI_API_KEY
-        sync: false
+        value: AIzaSyB7kF9sD2xQ8wE5rT1yU3iO7pA4sG6hJ0kL
       - key: SHEETS_CREDS
         sync: false
       - key: SPREADSHEET_ID
         value: 1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw
       - key: TMDB_API_KEY
-        sync: false
+        value: 2dca21d2886540666435864f88656876
+      - key: YOUTUBE_API_KEY
+        value: AIzaSyCnX2z8xL4Xg0QdF7hJk9mP2sR5tU8vY1a
 routes:
   - type: rewrite
     source: /*
