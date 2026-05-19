@@ -8,7 +8,7 @@ services:
       - key: GEMINI_API_KEY
         value: AIzaSyB7kF9sD2xQ8wE5rT1yU3iO7pA4sG6hJ0kL
       - key: SHEETS_CREDS
-        sync: false
+        sync: films
       - key: SPREADSHEET_ID
         value: 1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw
       - key: TMDB_API_KEY
