@@ -1540,6 +1540,39 @@ async function ytSearch() {
     return;
   }
 
+  // ========== 這裡是修復的重點 ==========
+  try {
+    // 呼叫你自己的後端 API，不是外部 API
+    const r = await apiFetch('/youtube/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        query: q,
+        max_results: maxResults
+      })
+    });
+
+    if (!r.ok) {
+      st.className = 'sbox show err';
+      st.textContent = r.error || '搜尋失敗';
+      document.getElementById('btn-yt-search').disabled = false;
+      return;
+    }
+
+    ytResults = r.data || [];
+    ytNextPageToken = r.nextPageToken || '';
+    renderYtResults();
+    
+    st.className = 'sbox show ok';
+    st.textContent = `找到 ${ytResults.length} 筆`;
+    document.getElementById('yt-filter-bar').style.display = 'flex';
+  } catch (e) {
+    st.className = 'sbox show err';
+    st.textContent = 'YouTube 搜尋失敗：' + e.message;
+  }
+
+  document.getElementById('btn-yt-search').disabled = false;
+}
+
   try {
     const url = `/api/yt-search?key=${API_KEY}&q=${encodeURIComponent(q)}&maxResults=${maxResults}`;
     const res = await fetch(url);
