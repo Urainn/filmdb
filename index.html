@@ -1573,32 +1573,6 @@ async function ytSearch() {
   document.getElementById('btn-yt-search').disabled = false;
 }
 
-  try {
-    const url = `/api/yt-search?key=${API_KEY}&q=${encodeURIComponent(q)}&maxResults=${maxResults}`;
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.error) {
-      st.className = 'sbox show err';
-      st.textContent = data.error.message;
-      document.getElementById('btn-yt-search').disabled = false;
-      return;
-    }
-
-    ytResults = data.items;
-    ytNextPageToken = data.nextPageToken;
-    renderYtResults();
-    st.className = 'sbox show ok';
-    st.textContent = `找到 ${ytResults.length} 筆`;
-    document.getElementById('yt-filter-bar').style.display = 'flex';
-  } catch (e) {
-    st.className = 'sbox show err';
-    st.textContent = 'YouTube 搜尋失敗';
-  }
-
-  document.getElementById('btn-yt-search').disabled = false;
-}
-
 function renderYtResults() {
   const grid = document.getElementById('yt-results-grid');
   if (!ytResults.length) {
