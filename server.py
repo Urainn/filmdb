@@ -914,7 +914,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/config/keys/add":
             self.handle_add_key()
         elif path == "/youtube/search":
-            self.handle_youtube_search()
+            self.handle_youtube_search(body)
         elif path == "/youtube/info":
             self.handle_youtube_info()
         elif path == "/tmdb/search":
@@ -1009,8 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
             "count": len(combined),
         } if ok else {"ok": False, "error": "新增失敗"})
 
-    def handle_youtube_search(self):
-        body = self.read_body()
+    def handle_youtube_search(self,body):
         query = body.get("query", "").strip()
         max_results = min(int(body.get("max_results", 12)), 50)
         page_token = body.get("page_token", "").strip()
