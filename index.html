@@ -1461,17 +1461,20 @@ async function fetchTmdbFilled(query, maxResults, startPage, excludeIds = []) {
   return { data: results, nextPage };
 }
 
-async function ytSearch() {
+aasync function ytSearch() {
   const q = document.getElementById('yt-search-q').value.trim();
   const isTmdb = getSearchSource() === 'tmdb';
   const year = document.getElementById('tmdb-year')?.value.trim() || '';
+  
   if (!q && !(isTmdb && year)) {
     toast(isTmdb ? '請輸入關鍵字或年份' : '請輸入搜尋關鍵字', 'err');
     return;
   }
-  const maxResults = parseInt(document.getElementById('yt-search-count').value, 10) || 20;
 
+  const maxResults = parseInt(document.getElementById('yt-search-count').value, 10) || 20;
   const st = document.getElementById('yt-search-status');
+  
+  // 状态初始化
   st.className = 'sbox show loading';
   st.innerHTML = '<span class="spin"></span> 搜尋中...';
   document.getElementById('btn-yt-search').disabled = true;
@@ -1482,6 +1485,9 @@ async function ytSearch() {
   ytNextPageToken = '';
   tmdbNextPage = 1;
 
+  // ==============================================
+  // ① TMDB 影视搜索（你原本的代码，完全保留）
+  // ==============================================
   if (isTmdb) {
     try {
       const mediaType = getMediaType();
@@ -1540,6 +1546,47 @@ async function ytSearch() {
     return;
   }
 
+  // ==============================================
+  // ② YouTube 视频搜索（我帮你补全的核心逻辑）
+  // ==============================================
+  try {
+    // 调用你的后端 API 搜索 YouTube
+    const r = await apiFetch('/youtube/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        query: q,
+        max_results: maxResults
+      })
+    });
+
+    // API 返回失败
+    if (!r.ok) {
+      st.className = 'sbox show err';
+      st.textContent = r.error || 'YouTube 搜尋失敗';
+      document.getElementById('btn-yt-search').disabled = false;
+      return;
+    }
+
+    // 赋值结果 & 分页 token
+    ytResults = r.data || [];
+    ytNextPageToken = r.nextPageToken || '';
+
+    // 渲染结果
+    renderYtResults();
+
+    // 状态成功
+    st.className = 'sbox show ok';
+    st.textContent = `找到 ${ytResults.length} 筆 YouTube 影片`;
+    document.getElementById('yt-filter-bar').style.display = 'flex';
+
+  } catch (e) {
+    // 网络 / 服务器异常
+    st.className = 'sbox show err';
+    st.textContent = 'YouTube 搜尋失敗：' + e.message;
+  }
+
+  document.getElementById('btn-yt-search').disabled = false;
+}
   // ========== 這裡是修復的重點 ==========
   try {
     // 呼叫你自己的後端 API，不是外部 API
