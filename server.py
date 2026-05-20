@@ -1035,7 +1035,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read())
-            existing = {m.get("ytId") for m in db_read()}
+            
             results = []
             for item in data.get("items", []):
                 vid_id = item.get("id", {}).get("videoId", "")
