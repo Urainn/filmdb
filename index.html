@@ -1482,7 +1482,7 @@ async function ytSearch() {
   ytNextPageToken = '';
   tmdbNextPage = 1;
 
-  // TMDB 影視搜尋區塊（保留你原本程式）
+  // TMDB 影視搜尋區塊
   if (isTmdb) {
     try {
       const mediaType = getMediaType();
@@ -1541,7 +1541,7 @@ async function ytSearch() {
     return;
   }
 
-  // YouTube 影片搜尋邏輯（補齊雙源搜尋）
+  // YouTube 影片搜尋邏輯
   try {
     const res = await apiFetch('/youtube/search', {
       method: 'POST',
