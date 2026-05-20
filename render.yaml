@@ -13,7 +13,3 @@ services:
         value: 1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw
       - key: TMDB_API_KEY
         sync: false
-routes:
-  - type: rewrite
-    source: /*
-    destination: /
