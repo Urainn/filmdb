@@ -64,7 +64,8 @@ _key_lock = threading.Lock()
 _key_index = 0
 _sheet_id_cache = None
 
-
+# 記憶存放使用者喜好（後端重啟前都有效）
+user_behavior = {}
 
 
 def get_access_token():
@@ -73,7 +74,6 @@ def get_access_token():
             return _token_cache["token"]
         if not SHEETS_CREDS:
             raise Exception("未設定 SHEETS_CREDS")
-
 
         creds = json.loads(SHEETS_CREDS)
         now = int(time.time())
@@ -90,7 +90,6 @@ def get_access_token():
             }).encode()
         ).rstrip(b"=").decode()
 
-
         try:
             from cryptography.hazmat.primitives import serialization, hashes
             from cryptography.hazmat.primitives.asymmetric import padding
@@ -105,7 +104,6 @@ def get_access_token():
             sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
         except ImportError:
             raise Exception("缺少 cryptography 套件")
-
 
         jwt_token = f"{header}.{payload}.{sig_b64}"
         token_body = (
@@ -558,8 +556,6 @@ def call_gemini_tmdb(item):
     if not keys:
         return {"ok": False, "error": "未設定 Gemini API Key"}
 
-    # TMDB search results can include a YouTube trailer URL. Prefer video analysis
-    # so scene tags come from the trailer visuals instead of TMDB synopsis guesses.
     trailer_url = (item.get("url") or "").strip()
     if trailer_url and ("youtube.com" in trailer_url or "youtu.be" in trailer_url):
         video_result = call_gemini_analyze(trailer_url)
@@ -568,8 +564,6 @@ def call_gemini_tmdb(item):
             if item.get("title"):
                 data["title"] = item.get("title")
             return {"ok": True, "data": data}
-        # Fall through to the text-only TMDB analysis if trailer analysis fails.
-
 
     media_label = "影劇" if item.get("mediaType") == "tv" else "電影"
     text_prompt = f"""請根據以下 TMDB {media_label}資料，產生給展覽觀眾搜尋用的電影資料 JSON。
@@ -600,7 +594,6 @@ def call_gemini_tmdb(item):
 5. 每個陣列都要去重，不要重複意思太接近的詞
 6. 所有輸出都必須使用台灣繁體中文，不可以出現簡體中文"""
 
-
     payload = {
         "contents": [{"parts": [{"text": text_prompt}]}],
         "generationConfig": {
@@ -609,7 +602,6 @@ def call_gemini_tmdb(item):
             "responseMimeType": "application/json",
         },
     }
-
 
     current_key = get_next_key()
     max_attempts = max(3, len(keys) * 2)
@@ -734,12 +726,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"  {format % args}")
 
-
     def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
-
 
     def send_json(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -750,7 +740,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-
     def send_html(self, html):
         body = html.encode("utf-8")
         self.send_response(200)
@@ -758,7 +747,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-
 
     def read_body(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -769,103 +757,22 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
-
     def do_OPTIONS(self):
         self.send_response(200)
         self.cors()
         self.end_headers()
 
-
     def do_GET(self):
-    path = self.path.split("?")[0]
-    if path == "/ping":
-        self.send_json(200, {"ok": True, "model": MODEL})
+        path = self.path.split("?")[0]
+        if path == "/ping":
+            self.send_json(200, {"ok": True, "model": MODEL})
 
-    # APP 專用：全部電影卡片
-    elif path == "/api/sheets_card":
-        movies = db_read()
-        sheets_card = []
-        for m in movies:
-            card = {
-                "id": m.get("id", ""),
-                "title": m.get("title", ""),
-                "poster": m.get("poster") or m.get("thumb", ""),
-                "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
-                "genres": m.get("genres", []),
-                "moods": m.get("moods", []),
-                "actors": m.get("cast", ""),
-                "url": m.get("url", ""),
-                "ytId": m.get("ytId", "")
-            }
-            sheets_card.append(card)
-        self.send_json(200, sheets_card)
-
-    elif path == "/db":
-        self.send_json(200, {"ok": True, "data": db_read()})
-    elif path == "/config/keys":
-        keys = get_gemini_keys()
-        masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
-        self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
-    elif path in ["/", "/index.html"]:
-        if os.path.exists("index.html"):
-            with open("index.html", "r", encoding="utf-8") as f:
-                self.send_html(f.read())
-        else:
-            self.send_json(404, {"ok": False, "error": "index.html 不存在"})
-    else:
-        self.send_json(404, {"ok": False, "error": "not found"})
-
-  # 記憶存放使用者喜好（後端重啟前都有效）
-user_behavior = {}
-
-def do_POST(self):
-    path = self.path.split("?")[0]
-    body = self.read_body()
-
-    # ========== APP 喜歡 ==========
-    if path == "/api/user/like":
-        userName = body.get("userName","")
-        movieId = body.get("movieId","")
-        if not userName or not movieId:
-            self.send_json(400, {"ok":False})
-            return
-        if userName not in user_behavior:
-            user_behavior[userName] = {"like":[],"dislike":[]}
-        u = user_behavior[userName]
-        if movieId not in u["like"]:
-            u["like"].append(movieId)
-        if movieId in u["dislike"]:
-            u["dislike"].remove(movieId)
-        self.send_json(200, {"ok":True})
-        return
-
-    # ========== APP 不喜歡 ==========
-    if path == "/api/user/dislike":
-        userName = body.get("userName","")
-        movieId = body.get("movieId","")
-        if not userName or not movieId:
-            self.send_json(400, {"ok":False})
-            return
-        if userName not in user_behavior:
-            user_behavior[userName] = {"like":[],"dislike":[]}
-        u = user_behavior[userName]
-        if movieId not in u["dislike"]:
-            u["dislike"].append(movieId)
-        if movieId in u["like"]:
-            u["like"].remove(movieId)
-        self.send_json(200, {"ok":True})
-        return
-
-    # ========== APP 個人化推薦 ==========
-    if path == "/api/sheets_card/recommend":
-        userName = body.get("userName","")
-        limit = int(body.get("limit",20))
-        if not userName or userName not in user_behavior:
-            # 無使用者就回隨機前幾部
-            allCards = []
+        # APP 專用：全部電影卡片
+        elif path == "/api/sheets_card":
             movies = db_read()
+            sheets_card = []
             for m in movies:
-                allCards.append({
+                card = {
                     "id": m.get("id", ""),
                     "title": m.get("title", ""),
                     "poster": m.get("poster") or m.get("thumb", ""),
@@ -875,82 +782,150 @@ def do_POST(self):
                     "actors": m.get("cast", ""),
                     "url": m.get("url", ""),
                     "ytId": m.get("ytId", "")
-                })
-            self.send_json(200, allCards[:limit])
+                }
+                sheets_card.append(card)
+            self.send_json(200, sheets_card)
+
+        elif path == "/db":
+            self.send_json(200, {"ok": True, "data": db_read()})
+        elif path == "/config/keys":
+            keys = get_gemini_keys()
+            masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
+            self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
+        elif path in ["/", "/index.html"]:
+            if os.path.exists("index.html"):
+                with open("index.html", "r", encoding="utf-8") as f:
+                    self.send_html(f.read())
+            else:
+                self.send_json(404, {"ok": False, "error": "index.html 不存在"})
+        else:
+            self.send_json(404, {"ok": False, "error": "not found"})
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        body = self.read_body()
+
+        # ========== APP 喜歡 ==========
+        if path == "/api/user/like":
+            userName = body.get("userName", "")
+            movieId = body.get("movieId", "")
+            if not userName or not movieId:
+                self.send_json(400, {"ok": False})
+                return
+            if userName not in user_behavior:
+                user_behavior[userName] = {"like": [], "dislike": []}
+            u = user_behavior[userName]
+            if movieId not in u["like"]:
+                u["like"].append(movieId)
+            if movieId in u["dislike"]:
+                u["dislike"].remove(movieId)
+            self.send_json(200, {"ok": True})
             return
 
-        u = user_behavior[userName]
-        movies = db_read()
+        # ========== APP 不喜歡 ==========
+        if path == "/api/user/dislike":
+            userName = body.get("userName", "")
+            movieId = body.get("movieId", "")
+            if not userName or not movieId:
+                self.send_json(400, {"ok": False})
+                return
+            if userName not in user_behavior:
+                user_behavior[userName] = {"like": [], "dislike": []}
+            u = user_behavior[userName]
+            if movieId not in u["dislike"]:
+                u["dislike"].append(movieId)
+            if movieId in u["like"]:
+                u["like"].remove(movieId)
+            self.send_json(200, {"ok": True})
+            return
 
-        # 演算分數
-        def getScore(m):
-            score = 0
-            if m["id"] in u["like"]:
-                score += 50
-            if m["id"] in u["dislike"]:
-                score -= 100
-            # 標籤加權
-            for g in m.get("genres",[]):
-                if any(gg in u["like"] for gg in g): score +=3
-            for s in m.get("scenes",[]):
-                if any(ss in u["like"] for ss in s): score +=2
-            return score
+        # ========== APP 個人化推薦 ==========
+        if path == "/api/sheets_card/recommend":
+            userName = body.get("userName", "")
+            limit = int(body.get("limit", 20))
+            if not userName or userName not in user_behavior:
+                allCards = []
+                movies = db_read()
+                for m in movies:
+                    allCards.append({
+                        "id": m.get("id", ""),
+                        "title": m.get("title", ""),
+                        "poster": m.get("poster") or m.get("thumb", ""),
+                        "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+                        "genres": m.get("genres", []),
+                        "moods": m.get("moods", []),
+                        "actors": m.get("cast", ""),
+                        "url": m.get("url", ""),
+                        "ytId": m.get("ytId", "")
+                    })
+                self.send_json(200, allCards[:limit])
+                return
 
-        # 轉卡片 + 排序
-        listCards = []
-        for m in movies:
-            card = {
-                "id": m.get("id", ""),
-                "title": m.get("title", ""),
-                "poster": m.get("poster") or m.get("thumb", ""),
-                "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
-                "genres": m.get("genres", []),
-                "moods": m.get("moods", []),
-                "actors": m.get("cast", ""),
-                "url": m.get("url", ""),
-                "ytId": m.get("ytId", ""),
-                "score": getScore(m)
-            }
-            # 隱藏已不喜歡
-            if card["score"] > -50:
-                listCards.append(card)
+            u = user_behavior[userName]
+            movies = db_read()
 
-        # 高分在前
-        listCards.sort(key=lambda x:x["score"], reverse=True)
-        res = listCards[:limit]
-        # 拿掉分數不給 APP
-        for r in res:
-            r.pop("score",None)
+            def getScore(m):
+                score = 0
+                if m["id"] in u["like"]:
+                    score += 50
+                if m["id"] in u["dislike"]:
+                    score -= 100
+                for g in m.get("genres", []):
+                    if any(gg in u["like"] for gg in g):
+                        score += 3
+                for s in m.get("scenes", []):
+                    if any(ss in u["like"] for ss in s):
+                        score += 2
+                return score
 
-        self.send_json(200, res)
-        return
+            listCards = []
+            for m in movies:
+                card = {
+                    "id": m.get("id", ""),
+                    "title": m.get("title", ""),
+                    "poster": m.get("poster") or m.get("thumb", ""),
+                    "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+                    "genres": m.get("genres", []),
+                    "moods": m.get("moods", []),
+                    "actors": m.get("cast", ""),
+                    "url": m.get("url", ""),
+                    "ytId": m.get("ytId", ""),
+                    "score": getScore(m)
+                }
+                if card["score"] > -50:
+                    listCards.append(card)
 
-    # 原本舊的 POST 路由保留
-    path = self.path.split("?")[0]
-    print(f"  POST 收到路徑: {path}")
-    if path == "/analyze":
-        self.handle_analyze()
-    elif path == "/db":
-        self.handle_db_add()
-    elif path == "/config/keys":
-        self.handle_save_keys()
-    elif path == "/config/keys/add":
-        self.handle_add_key()
-    elif path == "/youtube/search":
-        self.handle_youtube_search()
-    elif path == "/youtube/info":
-        self.handle_youtube_info()
-    elif path == "/tmdb/search":
-        self.handle_tmdb_search()
-    elif path == "/tmdb/analyze":
-        self.handle_tmdb_analyze()
-    elif path == "/youtube/batch-analyze":
-        self.handle_batch_analyze()
-    elif path == "/ping":
-        self.send_json(200, {"ok": True})
-    else:
-        self.send_json(404, {"ok": False, "error": f"未知路徑: {path}"})
+            listCards.sort(key=lambda x: x["score"], reverse=True)
+            res = listCards[:limit]
+            for r in res:
+                r.pop("score", None)
+            self.send_json(200, res)
+            return
 
+        # 原本舊的 POST 路由
+        print(f"  POST 收到路徑: {path}")
+        if path == "/analyze":
+            self.handle_analyze()
+        elif path == "/db":
+            self.handle_db_add()
+        elif path == "/config/keys":
+            self.handle_save_keys()
+        elif path == "/config/keys/add":
+            self.handle_add_key()
+        elif path == "/youtube/search":
+            self.handle_youtube_search()
+        elif path == "/youtube/info":
+            self.handle_youtube_info()
+        elif path == "/tmdb/search":
+            self.handle_tmdb_search()
+        elif path == "/tmdb/analyze":
+            self.handle_tmdb_analyze()
+        elif path == "/youtube/batch-analyze":
+            self.handle_batch_analyze()
+        elif path == "/ping":
+            self.send_json(200, {"ok": True})
+        else:
+            self.send_json(404, {"ok": False, "error": f"未知路徑: {path}"})
 
     def do_DELETE(self):
         path = self.path.split("?")[0]
@@ -965,7 +940,6 @@ def do_POST(self):
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
 
-
     def handle_analyze(self):
         body = self.read_body()
         yt_url = body.get("url", "").strip()
@@ -973,7 +947,6 @@ def do_POST(self):
             self.send_json(400, {"ok": False, "error": "缺少 url"})
             return
         self.send_json(200, call_gemini_analyze(yt_url))
-
 
     def handle_db_add(self):
         body = self.read_body()
@@ -992,7 +965,6 @@ def do_POST(self):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": f"寫入資料庫失敗: {str(e)}"})
 
-
     def handle_save_keys(self):
         body = self.read_body()
         keys = body.get("keys", [])
@@ -1002,7 +974,6 @@ def do_POST(self):
         keys = [k.strip() for k in keys if k.strip()]
         ok = save_gemini_keys(keys)
         self.send_json(200, {"ok": ok, "count": len(keys)} if ok else {"ok": False, "error": "儲存失敗"})
-
 
     def handle_add_key(self):
         body = self.read_body()
@@ -1036,7 +1007,6 @@ def do_POST(self):
             "added": added,
             "count": len(combined),
         } if ok else {"ok": False, "error": "新增失敗"})
-
 
     def handle_youtube_search(self):
         body = self.read_body()
@@ -1094,7 +1064,6 @@ def do_POST(self):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
-
     def handle_youtube_info(self):
         body = self.read_body()
         yt_id = body.get("ytId", "").strip()
@@ -1137,7 +1106,6 @@ def do_POST(self):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
-
     def handle_tmdb_search(self):
         body = self.read_body()
         query = body.get("query", "").strip()
@@ -1148,7 +1116,6 @@ def do_POST(self):
         year = str(body.get("year", "")).strip()
         max_results = min(int(body.get("max_results", 20) or 20), 50)
         exclude_ids = set(body.get("exclude_ids") or [])
-
 
         try:
             if query:
@@ -1172,7 +1139,6 @@ def do_POST(self):
                         params["first_air_date_year"] = year
                 data = tmdb_request(f"/discover/{media_type}", params)
 
-
             existing_ids = {
                 f"tmdb-{m.get('mediaType')}-{m.get('tmdbId')}"
                 for m in db_read()
@@ -1190,7 +1156,6 @@ def do_POST(self):
                 if len(results) >= max_results:
                     break
 
-
             self.send_json(200, {
                 "ok": True,
                 "data": results,
@@ -1204,7 +1169,6 @@ def do_POST(self):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
-
     def handle_tmdb_analyze(self):
         body = self.read_body()
         item = body.get("item") or {}
@@ -1212,7 +1176,6 @@ def do_POST(self):
             self.send_json(400, {"ok": False, "error": "缺少 TMDB 作品資料"})
             return
         self.send_json(200, call_gemini_tmdb(item))
-
 
     def handle_batch_analyze(self):
         body = self.read_body()
