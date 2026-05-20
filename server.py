@@ -1039,8 +1039,7 @@ class Handler(BaseHTTPRequestHandler):
             results = []
             for item in data.get("items", []):
                 vid_id = item.get("id", {}).get("videoId", "")
-                if not vid_id:
-                    continue
+                if not vid_id: continue
                 snippet = item.get("snippet", {})
                 results.append({
                     "ytId": vid_id,
@@ -1049,16 +1048,17 @@ class Handler(BaseHTTPRequestHandler):
                     "publishedAt": snippet.get("publishedAt", "")[:10],
                     "thumb": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
                     "url": f"https://www.youtube.com/watch?v={vid_id}",
-                    "inDb": vid_id in existing,
+                    "inDb": False, # 先暫時設為 False ，確保能顯示
                 })
-            filtered = [r for r in results if not r["inDb"] and r["ytId"] not in exclude_ids]
+            
+            # 直接發送所有結果
             self.send_json(200, {
                 "ok": True,
-                "data": filtered,
+                "data": results,
                 "total": len(results),
-                "filtered": len(results) - len(filtered),
                 "nextPageToken": data.get("nextPageToken", ""),
             })
+            return # 確保直接回傳
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")
             self.send_json(200, {"ok": False, "error": f"YouTube API 錯誤: {err[:200]}"})
