@@ -27,7 +27,7 @@ SHEET_NAME = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET = "config"
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
 
 
 MODEL = "gemini-2.5-flash"
