@@ -20,6 +20,7 @@ import sys
 
 
 
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
