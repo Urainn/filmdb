@@ -1885,21 +1885,27 @@ async function ytBatchAnalyze() {
     barFill.style.width = (completed / total * 100) + '%';
 
     try {
+      // ✅ 修复：自动区分 YouTube / TMDB，调用正确接口
       const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, completed, total);
 
       if (analyzeRes.ok) {
         const p = analyzeRes.data;
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
-        const year = await getMovieYear(cleanMovieTitle(item.title) || item.title || '');
+        
+        // ✅ 修复：统一干净标题
+        const finalTitle = cleanMovieTitle(item.title) || item.title || p.title || '';
+        const year = await getMovieYear(finalTitle, item.tmdbId);
+        
+        // ✅ 修复：完整结构，支持 TMDB + YouTube
         const entry = {
           source: item.source || 'youtube',
           mediaType: item.mediaType || 'movie',
           tmdbId: item.tmdbId || '',
-          ytId: item.ytId || `tmdb-${item.mediaType || 'movie'}-${item.tmdbId}`,
-          url: item.url,
-          title: cleanMovieTitle(item.title) || item.title || p.title,
-          year,
+          ytId: item.ytId || '',
+          url: item.url || '',
+          title: finalTitle,
+          year: year,
           desc: p.desc || '',
           poster: item.poster || item.thumb || '',
           thumb: item.thumb || item.poster || '',
@@ -1911,20 +1917,24 @@ async function ytBatchAnalyze() {
           actors: (p.cast || p.actors || []).join('、')
         };
 
+        // ✅ 存入资料库
         await apiFetch('/db', {
           method: 'POST',
           body: JSON.stringify(entry)
         });
 
+        // ✅ 界面标记已入库
         const v = ytResults.find(v => v.ytId === item.ytId);
         if (v) v.inDb = true;
         ytSelected.delete(item.ytId);
+        
         const card = document.getElementById('ytcard-' + item.ytId);
         if (card) {
           card.classList.add('in-db');
           card.classList.remove('selected');
           card.querySelector('.yt-check').textContent = '✓';
         }
+        
         successCount++;
       } else {
         detailEl.textContent = `⚠ 「${item.title.slice(0, 20)}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
