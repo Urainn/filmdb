@@ -26,7 +26,7 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgr
 SHEET_NAME = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET = "config"
 PORT = int(os.environ.get("PORT", 8765))
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyDa_RbUzJpTziqFzlv67qjXCXg0dGCmK9A")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
 
 
