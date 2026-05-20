@@ -1482,19 +1482,15 @@ async function ytSearch() {
   ytNextPageToken = '';
   tmdbNextPage = 1;
 
-  // =============================================
-  // TMDB 搜尋（修好了，100% 可用）
-  // =============================================
   if (isTmdb) {
     try {
       const mediaType = getMediaType();
-      const API_KEY = "f8abc776cee1400e1fadf2874e1d8c2c";
       let url;
 
       if (mediaType === "movie") {
-        url = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(q)}&language=zh-TW&year=${year}&api_key=${API_KEY}`;
+        url = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(q)}&language=zh-TW&year=${year}&api_key=${TMDB_API_KEY}`;
       } else {
-        url = `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(q)}&language=zh-TW&first_air_date_year=${year}&api_key=${API_KEY}`;
+        url = `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(q)}&language=zh-TW&first_air_date_year=${year}&api_key=${TMDB_API_KEY}`;
       }
 
       const res = await fetch(url);
@@ -1507,14 +1503,28 @@ async function ytSearch() {
         return;
       }
 
-      ytResults = data.results.slice(0, maxResults).map(item => ({
-        ytId: item.id.toString(),
-        title: mediaType === "movie" ? item.title : item.name,
-        publishedAt: (mediaType === "movie" ? item.release_date : item.first_air_date) || "",
-        thumb: "https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=TMDB",
-        channel: "TMDB",
-        tmdbId: item.id
-      }));
+      const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
+      ytResults = data.results.slice(0, maxResults).map(item => {
+        const isMovie = mediaType === "movie";
+        const title = isMovie ? item.title : item.name;
+        const date = isMovie ? (item.release_date || "") : (item.first_air_date || "");
+        const yearVal = date.split("-")[0] || "";
+
+        return {
+          ytId: `tmdb-${mediaType}-${item.id}`,
+          tmdbId: item.id,
+          title: title,
+          year: yearVal,
+          thumb: item.poster_path
+            ? TMDB_IMG + item.poster_path
+            : "https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=無海報",
+          publishedAt: date,
+          channel: "TMDB",
+          inDb: db.some(m => m.tmdbId == item.id),
+          mediaType: mediaType,
+          source: "tmdb"
+        };
+      });
 
       renderYtResults();
       st.className = "sbox show ok";
@@ -1523,16 +1533,13 @@ async function ytSearch() {
 
     } catch (err) {
       st.className = "sbox show err";
-      st.textContent = "TMDB 無法使用（CORS 限制）";
+      st.textContent = "TMDB 搜尋失敗：" + err.message;
     }
 
     document.getElementById('btn-yt-search').disabled = false;
     return;
   }
 
-  // =============================================
-  // YOUTUBE 搜尋
-  // =============================================
   try {
     const url = `/api/yt-search?key=${API_KEY}&q=${encodeURIComponent(q)}&maxResults=${maxResults}`;
     const res = await fetch(url);
@@ -1554,73 +1561,6 @@ async function ytSearch() {
   } catch (e) {
     st.className = 'sbox show err';
     st.textContent = 'YouTube 搜尋失敗';
-  }
-
-  document.getElementById('btn-yt-search').disabled = false;
-}
-
-      // 組成畫面能顯示的格式
-      ytResults = data.results.slice(0, maxResults).map(item => {
-        const isMovie = mediaType === "movie";
-        const title = isMovie ? item.title : item.name;
-        const date = isMovie ? (item.release_date || "") : (item.first_air_date || "");
-        const yearVal = date.split("-")[0] || "";
-
-        return {
-          ytId: `tmdb-${mediaType}-${item.id}`,
-          tmdbId: item.id,
-          title: title,
-          year: yearVal,
-          thumb: item.poster_path
-            ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
-            : "https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=無海報",
-          publishedAt: date,
-          channel: "TMDB",
-          inDb: db.some(m => m.tmdbId == item.id),
-          mediaType: mediaType,
-          source: "tmdb"
-        };
-      });
-
-      renderYtResults(); // 畫面渲染
-      st.className = "sbox show ok";
-      st.textContent = `找到 ${ytResults.length} 筆`;
-      document.getElementById('yt-filter-bar').style.display = "flex";
-
-    } catch (err) {
-      st.className = "sbox show err";
-      st.textContent = "TMDB 搜尋失敗：" + err.message;
-    }
-
-    document.getElementById('btn-yt-search').disabled = false;
-    return;
-  }
-
-  // ==============================
-  // 原本 YouTube 邏輯（保留不動）
-  // ==============================
-  try {
-    const url = `/api/yt-search?key=${API_KEY}&q=${encodeURIComponent(q)}&maxResults=${maxResults}`;
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.error) {
-      st.className = 'sbox show err';
-      st.textContent = data.error.message;
-      document.getElementById('btn-yt-search').disabled = false;
-      return;
-    }
-
-    ytResults = data.items;
-    ytNextPageToken = data.nextPageToken;
-    renderYtResults();
-
-    st.className = 'sbox show ok';
-    st.textContent = `找到 ${ytResults.length} 筆`;
-    document.getElementById('yt-filter-bar').style.display = 'flex';
-  } catch (e) {
-    st.className = 'sbox show err';
-    st.textContent = '搜尋失敗';
   }
 
   document.getElementById('btn-yt-search').disabled = false;
