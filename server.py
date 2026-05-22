@@ -16,7 +16,7 @@ import time
 import threading
 import base64
 import sys
-
+import asyncio
 
 
 
@@ -1186,49 +1186,55 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json(200, await call_gemini_tmdb(item))
 
-    async def handle_batch_analyze(self):
-        body = self.read_body()
-        urls = body.get("urls", [])
-        if not urls:
-            self.send_json(400, {"ok": False, "error": "缺少 urls"})
-            return
-        results = []
-        for i, url_info in enumerate(urls):
-            yt_url = url_info.get("url", "")
-            yt_id = url_info.get("ytId", "")
-            result = await call_gemini_analyze(yt_url)
-            if result.get("ok"):
-                p = result["data"]
-                sm = p.get("scenes_main", [])
-                ss = p.get("scenes_sub", [])
-                entry = {
-                    "id": uid(),
-                    "ytId": yt_id,
-                    "url": yt_url,
-                    "title": clean_movie_title(url_info.get("title", "")) or url_info.get("title", "") or p.get("title", ""),
-                    "desc": p.get("desc", ""),
-                    "scenesMain": sm,
-                    "scenesSub": ss,
-                    "scenes": sm + ss,
-                    "genres": p.get("genres", []),
-                    "moods": p.get("moods", []),
-                }
-                existing = db_read()
-                dup = next((m for m in existing if m.get("ytId") == yt_id), None)
-                if dup:
-                    row = db_find_row(dup["id"])
-                    if row:
-                        entry["id"] = dup["id"]
-                        db_update_row(row, entry)
-                else:
-                    db_append(entry)
-                results.append({"ytId": yt_id, "ok": True, "title": entry["title"]})
+   async def handle_batch_analyze(self):
+    body = self.read_body()
+    urls = body.get("urls", [])
+    if not urls:
+        self.send_json(400, {"ok": False, "error": "缺少 urls"})
+        return
+    results = []
+    for i, url_info in enumerate(urls):
+        yt_url = url_info.get("url", "")
+        yt_id = url_info.get("ytId", "")
+        
+        # ✅ 正確：等待異步函數完成
+        result = await call_gemini_analyze(yt_url)
+        
+        if result.get("ok"):
+            p = result["data"]
+            sm = p.get("scenes_main", [])
+            ss = p.get("scenes_sub", [])
+            entry = {
+                "id": uid(),
+                "ytId": yt_id,
+                "url": yt_url,
+                "title": clean_movie_title(url_info.get("title", "")) or url_info.get("title", "") or p.get("title", ""),
+                "desc": p.get("desc", ""),
+                "scenesMain": sm,
+                "scenesSub": ss,
+                "scenes": sm + ss,
+                "genres": p.get("genres", []),
+                "moods": p.get("moods", []),
+            }
+            existing = db_read()
+            dup = next((m for m in existing if m.get("ytId") == yt_id), None)
+            if dup:
+                row = db_find_row(dup["id"])
+                if row:
+                    entry["id"] = dup["id"]
+                    db_update_row(row, entry)
             else:
-                results.append({"ytId": yt_id, "ok": False, "error": result.get("error", "分析失敗")})
-            if i < len(urls) - 1:
-                time.sleep(2)
-        ok_count = sum(1 for r in results if r.get("ok"))
-        self.send_json(200, {"ok": True, "results": results, "success": ok_count, "total": len(urls)})
+                db_append(entry)
+            results.append({"ytId": yt_id, "ok": True, "title": entry["title"]})
+        else:
+            results.append({"ytId": yt_id, "ok": False, "error": result.get("error", "分析失敗")})
+        
+        # ✅ 正確：非阻塞延遲，讓出控制權給事件循環
+        if i < len(urls) - 1:
+            await asyncio.sleep(2) # <--- 這是正確的寫法！
+            
+    ok_count = sum(1 for r in results if r.get("ok"))
+    self.send_json(200, {"ok": True, "results": results, "success": ok_count, "total": len(urls)})
 
 
 
