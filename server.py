@@ -1186,7 +1186,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json(200, await call_gemini_tmdb(item))
 
-    def handle_batch_analyze(self):
+    async def handle_batch_analyze(self):
         body = self.read_body()
         urls = body.get("urls", [])
         if not urls:
@@ -1196,7 +1196,7 @@ class Handler(BaseHTTPRequestHandler):
         for i, url_info in enumerate(urls):
             yt_url = url_info.get("url", "")
             yt_id = url_info.get("ytId", "")
-            result = call_gemini_analyze(yt_url)
+            result = await call_gemini_analyze(yt_url)
             if result.get("ok"):
                 p = result["data"]
                 sm = p.get("scenes_main", [])
