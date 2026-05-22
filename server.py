@@ -21,7 +21,7 @@ import sys
 
 
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDRYpc2lX5vJN8QGTeJVu5BSd9Nqr67-ME")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
 SHEET_NAME = os.environ.get("SHEET_NAME", "films")
