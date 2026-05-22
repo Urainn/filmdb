@@ -494,9 +494,11 @@ def normalize_analysis_result(result):
 async def call_gemini_analyze(yt_url):
     keys = get_gemini_keys()
     if not keys:
+        # 這裡也加上詳細訊息
+        print(f"!!! 錯誤: 未設定 Gemini API Key，請檢查環境變數或 Google Sheets 設定。")
         return {"ok": False, "error": "未設定 Gemini API Key"}
     
-    import httpx  # ← 新增这行
+    import httpx
     
     payload = {
         "contents": [{
@@ -521,8 +523,9 @@ async def call_gemini_analyze(yt_url):
         )
         
         try:
-            async with httpx.AsyncClient(timeout=30) as client:  # ← 改用 httpx
-                resp = await client.post(gemini_url, json=payload)  # ← 非同步请求
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(gemini_url, json=payload)
+                resp.raise_for_status() # <--- 加上這行，如果 HTTP 狀態不是 200，會直接拋出錯誤
                 data = resp.json()
             
             text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -539,17 +542,28 @@ async def call_gemini_analyze(yt_url):
             result = normalize_analysis_result(result)
             return {"ok": True, "data": result}
             
-        except httpx.HTTPError as e:  # ← 捕获 httpx 错误
-            err = e.response.text
+        except httpx.HTTPStatusError as e:
+            # <--- 這裡可以更詳細地印出 HTTP 錯誤
+            print(f"!!! HTTP 錯誤 (嘗試 {attempt}/{max_attempts}): {e.response.status_code}")
+            print(f"!!! 回應內容: {e.response.text[:500]}")
             if e.response.status_code in (403, 429):
                 current_key = get_next_key(failed_key=current_key)
-                time.sleep(5)
+                await asyncio.sleep(5)
                 continue
             if e.response.status_code == 503 and attempt < max_attempts:
-                time.sleep(8)
+                await asyncio.sleep(8)
                 continue
-            return {"ok": False, "error": f"Gemini API 錯誤 {e.response.status_code}: {err[:300]}"}
+            return {"ok": False, "error": f"Gemini API 錯誤 {e.response.status_code}: {e.response.text[:300]}"}
+        except httpx.HTTPError as e:
+            # <--- 這裡可以印出網路層面的錯誤
+            print(f"!!! 網路錯誤 (嘗試 {attempt}/{max_attempts}): {type(e).__name__}")
+            print(f"!!! 錯誤訊息: {str(e)}")
+            return {"ok": False, "error": f"Gemini 分析錯誤: {str(e)}"}
         except Exception as e:
+            # <--- 這裡可以印出所有其他未知錯誤
+            print(f"!!! 未知錯誤 (嘗試 {attempt}/{max_attempts}): {type(e).__name__}")
+            print(f"!!! 錯誤訊息: {str(e)}")
+            print(f"!!! 完整追蹤: \n{traceback.format_exc()}") # <--- 印出完整的錯誤堆疊
             return {"ok": False, "error": str(e)}
     
     return {"ok": False, "error": "Gemini 分析重試次數已用完"}
