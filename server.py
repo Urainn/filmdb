@@ -490,10 +490,13 @@ def normalize_analysis_result(result):
 
 
 
-def call_gemini_analyze(yt_url):
+async def call_gemini_analyze(yt_url):
     keys = get_gemini_keys()
     if not keys:
         return {"ok": False, "error": "未設定 Gemini API Key"}
+    
+    import httpx  # ← 新增这行
+    
     payload = {
         "contents": [{
             "parts": [
@@ -509,24 +512,23 @@ def call_gemini_analyze(yt_url):
     }
     current_key = get_next_key()
     max_attempts = max(3, len(keys) * 2)
+    
     for attempt in range(1, max_attempts + 1):
         gemini_url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{MODEL}:generateContent?key={current_key}"
         )
-        req = urllib.request.Request(
-            gemini_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            async with httpx.AsyncClient(timeout=30) as client:  # ← 改用 httpx
+                resp = await client.post(gemini_url, json=payload)  # ← 非同步请求
+                data = resp.json()
+            
             text = data["candidates"][0]["content"]["parts"][0]["text"]
             result = extract_json(text)
             if not result:
                 return {"ok": False, "error": f"無法解析 JSON: {text[:200]}"}
+            
             result.setdefault("title", "")
             result.setdefault("desc", "")
             result.setdefault("scenes_main", [])
@@ -535,31 +537,36 @@ def call_gemini_analyze(yt_url):
             result.setdefault("moods", [])
             result = normalize_analysis_result(result)
             return {"ok": True, "data": result}
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")
-            if e.code in (403, 429):
+            
+        except httpx.HTTPError as e:  # ← 捕获 httpx 错误
+            err = e.response.text
+            if e.response.status_code in (403, 429):
                 current_key = get_next_key(failed_key=current_key)
                 time.sleep(5)
                 continue
-            if e.code == 503 and attempt < max_attempts:
+            if e.response.status_code == 503 and attempt < max_attempts:
                 time.sleep(8)
                 continue
-            return {"ok": False, "error": f"Gemini API 錯誤 {e.code}: {err[:300]}"}
+            return {"ok": False, "error": f"Gemini API 錯誤 {e.response.status_code}: {err[:300]}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+    
     return {"ok": False, "error": "Gemini 分析重試次數已用完"}
 
 
 
 
-def call_gemini_tmdb(item):
+
+async def call_gemini_tmdb(item):
     keys = get_gemini_keys()
     if not keys:
         return {"ok": False, "error": "未設定 Gemini API Key"}
-
+    
+    import httpx  # ← 新增这行
+    
     trailer_url = (item.get("url") or "").strip()
     if trailer_url and ("youtube.com" in trailer_url or "youtu.be" in trailer_url):
-        video_result = call_gemini_analyze(trailer_url)
+        video_result = await call_gemini_analyze(trailer_url)  # ← 等待分析完成
         if video_result.get("ok") and isinstance(video_result.get("data"), dict):
             data = video_result["data"]
             if item.get("title"):
@@ -583,7 +590,7 @@ def call_gemini_tmdb(item):
   "scenes_main": ["3到6個主要場景，只填具體地點名稱"],
   "scenes_sub": ["3到6個次要場景，只填具體地點名稱"],
   "genres": ["6到10個類型與題材關鍵詞"],
-  "moods": ["8到14個搜尋關鍵詞，包含情緒、氛圍、敘事母題、角色關係、社會議題或視覺風格"]
+  "moods": ["8到14個搜尋關鍵詞，包含情緒、氛圍、敘事母題、角色關係、社會議題或視覺風格"],
   "cast": ["演員1名稱", "演員2名稱", "演員3名稱"]  // 列表中可以包含多位演員
 }}
 
@@ -606,24 +613,23 @@ def call_gemini_tmdb(item):
 
     current_key = get_next_key()
     max_attempts = max(3, len(keys) * 2)
+    
     for attempt in range(1, max_attempts + 1):
         gemini_url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{MODEL}:generateContent?key={current_key}"
         )
-        req = urllib.request.Request(
-            gemini_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        
         try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            async with httpx.AsyncClient(timeout=30) as client:  # ← 改用 httpx
+                resp = await client.post(gemini_url, json=payload)  # ← 非同步请求
+                data = resp.json()
+            
             text = data["candidates"][0]["content"]["parts"][0]["text"]
             result = extract_json(text)
             if not result:
                 return {"ok": False, "error": f"無法解析 JSON: {text[:200]}"}
+            
             result.setdefault("title", item.get("title", ""))
             result.setdefault("desc", item.get("desc", ""))
             result.setdefault("scenes_main", [])
@@ -632,19 +638,22 @@ def call_gemini_tmdb(item):
             result.setdefault("moods", [])
             result = normalize_analysis_result(result)
             return {"ok": True, "data": result}
-        except urllib.error.HTTPError as e:
-            err = e.read().decode("utf-8", errors="replace")
-            if e.code in (403, 429):
+            
+        except httpx.HTTPError as e:  # ← 捕获 httpx 错误
+            err = e.response.text
+            if e.response.status_code in (403, 429):
                 current_key = get_next_key(failed_key=current_key)
                 time.sleep(5)
                 continue
-            if e.code == 503 and attempt < max_attempts:
+            if e.response.status_code == 503 and attempt < max_attempts:
                 time.sleep(8)
                 continue
-            return {"ok": False, "error": f"Gemini API 錯誤 {e.code}: {err[:300]}"}
+            return {"ok": False, "error": f"Gemini API 錯誤 {e.response.status_code}: {err[:300]}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+    
     return {"ok": False, "error": "Gemini 分析重試次數已用完"}
+
 
 
 
@@ -941,13 +950,13 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
 
-    def handle_analyze(self):
+    async def handle_analyze(self):
         body = self.read_body()
         yt_url = body.get("url", "").strip()
         if not yt_url:
             self.send_json(400, {"ok": False, "error": "缺少 url"})
             return
-        self.send_json(200, call_gemini_analyze(yt_url))
+        self.send_json(200, await call_gemini_analyze(yt_url))
 
     def handle_db_add(self):
         body = self.read_body()
@@ -1169,13 +1178,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json(200, {"ok": False, "error": str(e)})
 
-    def handle_tmdb_analyze(self):
+    async def handle_tmdb_analyze(self):
         body = self.read_body()
         item = body.get("item") or {}
         if not item.get("title"):
             self.send_json(400, {"ok": False, "error": "缺少 TMDB 作品資料"})
             return
-        self.send_json(200, call_gemini_tmdb(item))
+        self.send_json(200, await call_gemini_tmdb(item))
 
     def handle_batch_analyze(self):
         body = self.read_body()
