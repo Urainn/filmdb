@@ -16,6 +16,7 @@
   --blue: #7ab8f2; --blue-dim: rgba(122,184,242,0.08);
   --amber: #f2c97a;
   --radius: 8px; --radius-lg: 12px;
+  --shadow: 0 10px 30px rgba(0,0,0,0.35);
 }
 html { font-size: 14px; }
 body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
@@ -107,10 +108,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .step-desc { font-size: 11px; color: var(--text2); margin-bottom: 10px; line-height: 1.5; }
 
 .sbox { padding: 9px 12px; border-radius: var(--radius); font-size: 11px; font-family: 'DM Mono', monospace; border: 1px solid var(--border); background: var(--surface); color: var(--text2); display: none; line-height: 1.6; margin-bottom: 10px; }
-.sbox.show { display: block; }
 .sbox.loading { color: var(--amber); border-color: rgba(242,201,122,0.2); }
 .sbox.ok { color: var(--accent); border-color: rgba(212,242,122,0.2); }
 .sbox.err { color: var(--red); border-color: rgba(242,122,122,0.2); }
+.sbox.show { display: block; }
 
 .yt-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-family: 'DM Mono', monospace; color: var(--blue); background: var(--blue-dim); border: 1px solid rgba(122,184,242,0.2); border-radius: 4px; padding: 2px 7px; margin-top: 4px; }
 
@@ -138,7 +139,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .empty { text-align: center; padding: 56px 20px; color: var(--text3); }
 .empty-ico { font-size: 30px; margin-bottom: 10px; opacity: 0.35; }
 
-#toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 9px 14px; font-size: 11.5px; color: var(--text); z-index: 999; opacity: 0; transform: translateY(6px); transition: all 0.18s; pointer-events: none; font-family: 'DM Mono', monospace; }
+#toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius); padding: 9px 14px; font-size: 11.5px; color: var(--text); z-index: 999; opacity: 0; transform: translateY(6px); transition: all 0.18s; font-family: 'DM Mono', monospace; }
 #toast.show { opacity: 1; transform: translateY(0); }
 #toast.ok { border-color: rgba(212,242,122,0.3); color: var(--accent); }
 #toast.err { border-color: rgba(242,122,122,0.3); color: var(--red); }
@@ -193,9 +194,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="nav-item" onclick="go('add',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="7"/><line x1="8" y1="5" x2="8" y2="11"/><line x1="5" y1="8" x2="11" y2="8"/></svg>新增電影
     </div>
-    <div class="nav-item" onclick="go('search-yt',this)">
-      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></svg>批次搜尋匯入
-    </div>
 
     <div class="nav-label" style="margin-top:6px">APP 專用</div>
     <div class="nav-item" onclick="go('sheets',this)">
@@ -215,7 +213,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
   </div>
     
     <div class="nav-item" onclick="go('settings',this)">
-      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>API Key 設定
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>API Key 設定
     </div>
   </nav>
   <div class="sidebar-foot">
@@ -232,7 +230,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="page-head">
       <div><div class="page-title">資料庫總覽</div><div class="page-sub">所有裝置共用同一份雲端資料庫，即時同步</div></div>
       <div class="btn-row">
-        <button class="btn btn-sm" onclick="loadDb()">↻ 重新整理</button>
+        <button class="btn btn-sm" onclick="loadDb()">!重新整理</button>
         <button class="btn btn-accent" onclick="go('add',null)">＋ 新增電影</button>
       </div>
     </div>
@@ -242,7 +240,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <button class="btn btn-sm" onclick="reanalyzeSelectNone()">取消全選</button>
       <button class="btn btn-accent" id="btn-reanalyze-selected" onclick="reanalyzeSelected()" disabled>重新分析已選</button>
     </div>
-    <div id="reanalyze-progress" style="display:none;margin-bottom:16px;max-width:720px">
+    <div id="reanalyze-progress" style="display:none;margin-bottom:16px">
       <div class="sbox show loading" id="reanalyze-status">
         <span class="spin"></span><span id="reanalyze-msg">準備重新分析...</span>
       </div>
@@ -305,11 +303,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="f-title" type="text"></div>
         <div class="field"><label class="fl">上映年份</label><input class="fi" id="f-year" type="text" placeholder="自動抓取"></div>
         <div class="field"><label class="fl">簡介</label><textarea class="fta" id="f-desc" rows="2"></textarea></div>
-        <div class="field">
-          <label class="fl">主要場景</label>
-          <input class="fi" id="f-scenes-main" type="text">
-          <div class="fhint">最具代表性的 1-2 個主場景</div>
-        </div>
+        <div class="field"><label class="fl">主要場景</label><input class="fi" id="f-scenes-main" type="text"></div>
         <div class="field"><label class="fl">次要場景</label><input class="fi" id="f-scenes-sub" type="text"></div>
         <div class="field"><label class="fl">類型關鍵字</label><input class="fi" id="f-genres" type="text"></div>
         <div class="field"><label class="fl">情感／氛圍</label><input class="fi" id="f-moods" type="text"></div>
@@ -382,8 +376,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <option value="36">36 筆</option>
         <option value="50">50 筆</option>
       </select>
-      <button class="btn btn-accent" onclick="ytSearch()" id="btn-yt-search">🔍 搜尋</button>
-      <button class="btn btn-sm" onclick="tmdbAutoImport()" id="btn-tmdb-auto" style="display:none">✦ TMDB 自動匯入</button>
+      <button class="btn btn-accent" id="btn-yt-search" onclick="ytSearch()">🔍 搜尋</button>
+      <button class="btn btn-sm" id="btn-tmdb-auto" style="display:none">✦ TMDB 自動匯入</button>
     </div>
 
     <div style="font-size:10.5px;color:var(--text3);margin-bottom:10px;max-width:640px">
@@ -403,7 +397,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div id="yt-filter-bar" style="display:none;margin-bottom:12px;align-items:center;gap:10px">
       <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2);cursor:pointer;user-select:none">
         <input type="checkbox" id="yt-hide-indb" onchange="renderYtResults()" checked
-          style="accent-color:var(--accent);width:13px;height:13px">
+          style="width:13px;height:13px;accent-color:var(--accent);cursor:pointer">
         隱藏已在資料庫的影片
       </label>
       <span id="yt-filter-count" style="font-size:10.5px;color:var(--text3);font-family:'DM Mono',monospace"></span>
@@ -413,20 +407,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <span id="yt-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace"></span>
       <button class="btn btn-sm" onclick="ytSelectAll()">全選</button>
       <button class="btn btn-sm" onclick="ytSelectNone()">取消全選</button>
-      <button class="btn btn-sm" onclick="ytRefresh()" id="btn-yt-refresh" title="保留已勾選，重新搜尋補充新結果">↻ 重新整理結果</button>
-      <button class="btn btn-accent" id="btn-batch-analyze" onclick="ytBatchAnalyze()" disabled>
-        ✦ 批次分析並存入資料庫
-      </button>
-    </div>
-
-    <div id="yt-batch-progress" style="display:none;margin-bottom:16px;max-width:640px">
-      <div class="sbox show loading" id="yt-batch-status">
-        <span class="spin"></span><span id="yt-batch-msg">準備中...</span>
-      </div>
-      <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:4px;overflow:hidden;margin-top:8px">
-        <div id="yt-batch-bar-fill" style="height:100%;background:var(--accent);border-radius:99px;width:0%;transition:width 0.5s ease"></div>
-      </div>
-      <div style="font-size:10px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace" id="yt-batch-detail"></div>
+      <button class="btn btn-accent" id="btn-batch-analyze" onclick="ytBatchAnalyze()" disabled>批次分析並存入資料庫</button>
     </div>
 
     <div id="yt-results-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;max-width:900px"></div>
@@ -592,20 +573,20 @@ function cleanMovieTitle(title) {
   const bookTitleMatches = [...title.matchAll(bookTitleRe)];
   if (bookTitleMatches.length) {
     return bookTitleMatches[bookTitleMatches.length - 1][1]
-      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)/ig, '')
+      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b89\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5168\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a|\u771f\u4eba\u7248|\u7247\u6bb5|clip|trailer)/ig, '')
       .trim();
   }
   const bracketRe = /[\u3010\[]([^\u3010\u3011\[\]]*[\u3400-\u9fff][^\u3010\u3011\[\]]*)[\u3011\]]/g;
   const bracketMatches = [...title.matchAll(bracketRe)];
   if (bracketMatches.length) {
     return bracketMatches[bracketMatches.length - 1][1]
-      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)/ig, '')
+      .replace(/(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b89\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5168\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)/ig, '')
       .replace(/[|\uff5c:\uff1a\-_\u2013\u2014]+/g, ' ')
       .trim();
   }
   return title
     .replace(/\s*(?:Official\s*)?(?:Trailer|Clip|Teaser)\s*(?:\(\d{4}\))?/ig, '')
-    .replace(/\s*(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b98\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5148\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)\s*$/g, '')
+    .replace(/\s*(?:\u96fb\u5f71)?(?:\u6b63\u5f0f)?(?:\u5b89\u65b9)?(?:\u4e2d\u6587)?(?:\u9810\u544a|\u9810\u544a\u7247|\u5168\u5c0e\u9810\u544a|\u7d42\u6975\u9810\u544a)\s*$/g, '')
     .trim();
 }
 
@@ -647,7 +628,6 @@ async function loadDb() {
     if (r.ok) {
       db = r.data;
       updateStats();
-      renderList();
       setServerStatus(true);
     } else {
       setServerStatus(false);
@@ -735,9 +715,11 @@ function renderList() {
 
   let html = '';
   rows.forEach(m => {
+    // 修复：正确判断 ytId 是否为真实的 YouTube ID
     const thumb = m.ytId && !m.ytId.startsWith("tmdb-") 
-  ? `https://img.youtube.com/vi/${m.ytId}/hqdefault.jpg` 
-  : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='500' height='280'%3E%3Crect fill='%231a1a1a' width='100%25' height='100%25'/%3E%3Ctext fill='%23e8e6e1' font-family='sans-serif' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3E無海報%3C/text%3E%3C/svg%3E";
+      ? `https://img.youtube.com/vi/${m.ytId}/hqdefault.jpg` 
+      : "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='500' height='280'%3E%3Crect fill='%231a1a1a' width='100%25' height='100%25'/%3E%3Ctext fill='%23e8e6e1' font-family='sans-serif' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3E無海報%3C/text%3E%3C/svg%3E";
+
     html += `
       <tr>
         <td>
@@ -748,8 +730,7 @@ function renderList() {
         <td>
           <img class="thumb" src="${thumb}"
             onclick="playVideo('${m.ytId}','${esc(m.title)}')"
-            title="▶ 點擊播放預告片"
-            style="cursor:pointer"
+            title="▶ 點擊播放預告片"style="cursor:pointer"
             onerror="this.src='https://via.placeholder.com/500x750/1a1a1a/e8e6e1?text=Load+Fail'">
         </td>
         <td>
@@ -1088,11 +1069,11 @@ async function analyze() {
   await new Promise(res => setTimeout(res, 400));
 
   const p = r.data;
-  const year = await getMovieYear(curVideoTitle || p.title || '');
+  const year = await getMovieYear(curVideoTitle || p.title);
 
   if (duplicate) p._overwriteId = duplicate.id;
 
-  document.getElementById('f-title').value = curVideoTitle || p.title || '';
+  document.getElementById('f-title').value = curVideoTitle || p.title;
   document.getElementById('f-year').value = year;
   document.getElementById('f-desc').value = p.desc || '';
   document.getElementById('f-scenes-main').value = join(p.scenes_main);
@@ -1147,7 +1128,7 @@ async function saveEntry() {
 
   try {
     const r = await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
-    if (!r.ok) throw new Error(r.error);
+    if (!r.ok) throw new Error(r.error || '儲存失敗');
     toast(duplicate ? '已更新：' + title : '已新增：' + title, 'ok');
     await loadDb();
     go('list', document.querySelectorAll('.nav-item')[0]);
@@ -1248,7 +1229,7 @@ async function batchSyncAllActors() {
   if (batchSyncRunning) return toast("正在執行中，請稍後", "err");
   if (!TMDB_API_KEY) return toast("請先填寫 TMDB_API_KEY", "err");
 
-  const confirmRun = confirm(`即將自動批量同步【全部 ${db.length} 部電影】TMDB 演員名單
+  const confirmRun = confirm(`即將自動批量同步【全部 ${db.length} 部】電影 TMDB 演員名單
 會自動搜尋匹配、抓取演員、自動存入雲端資料庫
 是否開始執行？`);
   if (!confirmRun) return;
@@ -1265,7 +1246,7 @@ async function batchSyncAllActors() {
   for (let i = 0; i < db.length; i++) {
     const item = db[i];
     const nowIdx = i + 1;
-    logBox.innerHTML += `<div>【${nowIdx}/${total}】處理中：${item.title}</div>`;
+    logBox.innerHTML = `<div>【${nowIdx}/${total}】處理中：${item.title}</div>`;
     window.scrollTo(0, document.body.scrollHeight);
 
     if (!item.title) {
@@ -1428,9 +1409,9 @@ function getMediaType() {
 
 function onSearchSourceChange() {
   const isTmdb = getSearchSource() === 'tmdb';
-  const mediaType = document.getElementById('media-type');
-  const year = document.getElementById('tmdb-year');
-  const q = document.getElementById('yt-search-q');
+  const mediaType = getMediaType();
+  const year = document.getElementById('tmdb-year')?.value.trim() || '';
+  const q = document.getElementById('yt-search-q')?.value.trim() || '';
   const autoBtn = document.getElementById('btn-tmdb-auto');
   if (mediaType) mediaType.style.display = isTmdb ? 'block' : 'none';
   if (year) year.style.display = isTmdb ? 'block' : 'none';
@@ -1593,11 +1574,11 @@ async function ytSearch() {
 function renderYtResults() {
   const grid = document.getElementById('yt-results-grid');
   if (!ytResults.length) {
-    grid.innerHTML = '<div style="color:var(--text3);font-size:12px">沒有搜尋結果</div>';
+    grid.innerHTML = '<div style="color:#888;font-size:12px">沒有搜尋結果</div>';
     return;
   }
 
-  const hideInDb = document.getElementById('yt-hide-indb')?.checked ?? true;
+  const hideInDb = document.getElementById('hide-in-db')?.checked ?? true;
   const filtered = hideInDb ? ytResults.filter(v => !v.inDb) : ytResults;
 
   const filterCount = document.getElementById('yt-filter-count');
@@ -1607,18 +1588,17 @@ function renderYtResults() {
   }
 
   if (!filtered.length) {
-    grid.innerHTML = '<div style="color:var(--text3);font-size:12px">所有結果都已在資料庫中</div>';
+    grid.innerHTML = '<div style="color:#888;font-size:12px">所有結果都已在資料庫中</div>';
     updateYtBatchBar();
     return;
   }
 
   grid.innerHTML = filtered.map((v) => `
-    <div class="yt-card ${v.inDb ? 'in-db' : ''} ${ytSelected.has(v.ytId) ? 'selected' : ''}"
-      onclick="ytToggle('${v.ytId}', ${v.inDb})" id="ytcard-${v.ytId}">
+    <div class="yt-card ${v.inDb ? 'in-db' : ''} ${ytSelected.has(v.ytId) ? 'selected' : ''}" id="ytcard-${v.ytId}" onclick="ytToggle('${v.ytId}', ${v.inDb})">
       <div class="yt-check">${ytSelected.has(v.ytId) ? '✓' : ''}</div>
       <img class="yt-thumb" src="${v.thumb}" alt="${v.title}" onerror="this.style.background='#222'">
       <div class="yt-info">
-        <div class="yt-title">${v.title}</div>
+        <div class="yt-title">${v.title} ${v.year ? `(${v.year})` : ''}</div>
         <div class="yt-meta">${v.channel} · ${v.publishedAt}</div>
       </div>
     </div>
@@ -1734,7 +1714,6 @@ async function tmdbAutoImport() {
 
   document.getElementById('btn-tmdb-auto').disabled = true;
   document.getElementById('btn-yt-search').disabled = true;
-  document.getElementById('btn-yt-refresh').disabled = true;
   document.getElementById('yt-batch-progress').style.display = 'block';
 
   const msgEl = document.getElementById('yt-batch-msg');
@@ -1748,13 +1727,13 @@ async function tmdbAutoImport() {
   let completed = 0;
   let processedCount = 0;
   let successCount = 0;
-  let failCount = 0;
   const seen = new Set(ytResults.map(v => v.ytId));
 
   try {
     while (successCount < target && page) {
-      msgEl.textContent = `抓取 TMDB 清單中：已成功 ${successCount}/${target}`;
+      msgEl.textContent = `自動分析 TMDB 清單中：已成功 ${successCount}/${target} 部`;
       detailEl.textContent = `正在尋找未在資料庫且有中文片名的作品，第 ${page} 頁，已處理 ${processedCount} 部`;
+      barFill.style.width = (Math.min(successCount, target) / target * 100) + '%';
 
       const filled = await fetchTmdbFilled(q, Math.min(20, target - successCount), page, [...seen]);
       page = filled.nextPage || null;
@@ -1768,11 +1747,12 @@ async function tmdbAutoImport() {
         seen.add(item.ytId);
         processedCount++;
         msgEl.textContent = `自動分析匯入，處理第 ${processedCount} 部：${item.title.slice(0, 28)}...`;
-        detailEl.textContent = `目標 ${target} 部，已成功 ${successCount} 部，失敗/略過 ${failCount} 部`;
+        detailEl.textContent = `目標 ${target} 部，已成功 ${successCount} 部，失敗/略過 0 部`;
         barFill.style.width = (Math.min(successCount, target) / target * 100) + '%';
 
         try {
-          const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, completed, target);
+          // ✅ 修复：自动区分 YouTube / TMDB，调用正确接口
+          const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, processedCount, target);
           if (analyzeRes.ok) {
             const p = analyzeRes.data || {};
             const sm = p.scenes_main || [];
@@ -1782,9 +1762,9 @@ async function tmdbAutoImport() {
               source: 'tmdb',
               mediaType: item.mediaType || getMediaType(),
               tmdbId: item.tmdbId || '',
-              ytId: item.ytId || `tmdb-${item.mediaType || getMediaType()}-${item.tmdbId}`,
-              url: item.url,
-              title: item.title || p.title,
+              ytId: item.ytId || '',
+              url: item.url || '',
+              title: item.title || '',
               year: yearVal,
               desc: p.desc || item.desc || '',
               poster: item.poster || item.thumb || '',
@@ -1796,29 +1776,28 @@ async function tmdbAutoImport() {
               moods: p.moods || [],
               actors: (p.cast || p.actors || []).join('、')
             };
-            const saveRes = await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
-            if (!saveRes.ok) throw new Error(saveRes.error || '儲存失敗');
+
+            // ✅ 存入资料库
+            await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
             successCount++;
             ytResults = ytResults.filter(v => v.ytId !== item.ytId);
           } else {
-            failCount++;
-            detailEl.textContent = `「${item.title}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
+            detailEl.textContent = `⚠ 「${item.title.slice(0, 20)}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
           }
         } catch (e) {
-          failCount++;
-          detailEl.textContent = `「${item.title}」失敗：${e.message || e}，繼續下一部...`;
+          detailEl.textContent = `⚠ 連線錯誤：${e.message || e}，繼續下一部...`;
         }
 
         completed++;
-        if (successCount < target) await sleep(8000);
+        if (completed < target) await sleep(8000);
       }
     }
 
     tmdbNextPage = page;
     barFill.style.width = '100%';
     statusEl.className = 'sbox show ok';
-    msgEl.textContent = `完成，成功自動匯入 ${successCount}/${target} 部 TMDB 作品`;
-    detailEl.textContent = successCount < target ? `已處理 ${processedCount} 部，失敗/略過 ${failCount} 部。沒有更多符合條件的作品，或剩餘作品都已在資料庫。` : `已處理 ${processedCount} 部，失敗/略過 ${failCount} 部。`;
+    msgEl.textContent = `✓ 完成，成功自動匯入 ${successCount}/${target} 部 TMDB 作品`;
+    detailEl.textContent = successCount < target ? `已處理 ${processedCount} 部，失敗/略過 0 部。沒有更多符合條件的作品，或剩餘作品都已在資料庫。` : `已處理 ${processedCount} 部，失敗/略過 0 部。`;
     renderYtResults();
     if (successCount > 0) await loadDb();
   } catch (e) {
@@ -1829,294 +1808,9 @@ async function tmdbAutoImport() {
 
   document.getElementById('btn-tmdb-auto').disabled = false;
   document.getElementById('btn-yt-search').disabled = false;
-  document.getElementById('btn-yt-refresh').disabled = false;
 }
 
-function updateYtBatchBar() {
-  const bar = document.getElementById('yt-batch-bar');
-  const cnt = document.getElementById('yt-selected-count');
-  const btn = document.getElementById('btn-batch-analyze');
-  const n = ytSelected.size;
-  bar.style.display = n > 0 || ytResults.length > 0 ? 'flex' : 'none';
-  cnt.textContent = `已選 ${n} 部影片`;
-  btn.disabled = n === 0;
-}
-
-async function analyzeWithRetry(item, msgEl, detailEl, completed, total) {
-  const maxAttempts = 5;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const analyzeRes = await apiFetch(item.source === 'tmdb' ? '/tmdb/analyze' : '/analyze', {
-        method: 'POST',
-        body: JSON.stringify(item.source === 'tmdb' ? { item } : { url: item.url })
-      });
-
-      if (analyzeRes.ok) return analyzeRes;
-
-      const errorText = analyzeRes.error || '';
-      const isRateLimit = errorText.includes('429');
-      const isBusy = errorText.includes('503');
-      if ((isRateLimit || isBusy) && attempt < maxAttempts) {
-        const wait = isRateLimit ? 45000 : 10000;
-        msgEl.textContent = `分析中 (${completed + 1}/${total})：${item.title.slice(0, 28)}...`;
-        detailEl.textContent = `Gemini ${isRateLimit ? '暫時限流' : '忙碌'}，等待 ${Math.round(wait / 1000)} 秒後重試 ${attempt + 1}/${maxAttempts}`;
-        await sleep(wait);
-        continue;
-      }
-
-      return analyzeRes;
-    } catch (e) {
-      if (attempt >= maxAttempts) throw e;
-      msgEl.textContent = `分析中 (${completed + 1}/${total})：${item.title.slice(0, 28)}...`;
-      detailEl.textContent = `連線不穩，等待 8 秒後重試 ${attempt + 1}/${maxAttempts}`;
-      await sleep(8000);
-    }
-  }
-
-  return { ok: false, error: '分析重試次數已用完' };
-}
-
-async function ytBatchAnalyze() {
-  const selected = ytResults.filter(v => ytSelected.has(v.ytId));
-  if (!selected.length) return;
-
-  const confirmed = confirm(`確定要批次分析 ${selected.length} 部影片？\n每部約需 30-60 秒，總計約 ${Math.ceil(selected.length * 45 / 60)} 分鐘。`);
-  if (!confirmed) return;
-
-  document.getElementById('btn-batch-analyze').disabled = true;
-  document.getElementById('yt-batch-progress').style.display = 'block';
-
-  const msgEl = document.getElementById('yt-batch-msg');
-  const detailEl = document.getElementById('yt-batch-detail');
-  const barFill = document.getElementById('yt-batch-bar-fill');
-  const statusEl = document.getElementById('yt-batch-status');
-
-  let completed = 0;
-  let successCount = 0;
-  const total = selected.length;
-
-  for (const item of selected) {
-    msgEl.textContent = `分析中 (${completed + 1}/${total})：${item.title.slice(0, 28)}...`;
-    detailEl.textContent = `已完成 ${completed}／${total}，剩餘約 ${Math.ceil((total - completed) * 45 / 60)} 分鐘`;
-    barFill.style.width = (completed / total * 100) + '%';
-
-    try {
-      // ✅ 修复：自动区分 YouTube / TMDB，调用正确接口
-      const analyzeRes = await analyzeWithRetry(item, msgEl, detailEl, completed, total);
-
-      if (analyzeRes.ok) {
-        const p = analyzeRes.data;
-        const sm = p.scenes_main || [];
-        const ss = p.scenes_sub || [];
-        
-        // ✅ 修复：统一干净标题
-        const finalTitle = cleanMovieTitle(item.title) || item.title || p.title || '';
-        const year = await getMovieYear(finalTitle, item.tmdbId);
-        
-        // ✅ 修复：完整结构，支持 TMDB + YouTube
-        const entry = {
-          source: item.source || 'youtube',
-          mediaType: item.mediaType || 'movie',
-          tmdbId: item.tmdbId || '',
-          ytId: item.ytId || '',
-          url: item.url || '',
-          title: finalTitle,
-          year: year,
-          desc: p.desc || '',
-          poster: item.poster || item.thumb || '',
-          thumb: item.thumb || item.poster || '',
-          scenesMain: sm,
-          scenesSub: ss,
-          scenes: [...sm, ...ss],
-          genres: p.genres || [],
-          moods: p.moods || [],
-          actors: (p.cast || p.actors || []).join('、')
-        };
-
-        // ✅ 存入资料库
-        await apiFetch('/db', {
-          method: 'POST',
-          body: JSON.stringify(entry)
-        });
-
-        // ✅ 界面标记已入库
-        const v = ytResults.find(v => v.ytId === item.ytId);
-        if (v) v.inDb = true;
-        ytSelected.delete(item.ytId);
-        
-        const card = document.getElementById('ytcard-' + item.ytId);
-        if (card) {
-          card.classList.add('in-db');
-          card.classList.remove('selected');
-          card.querySelector('.yt-check').textContent = '✓';
-        }
-        
-        successCount++;
-      } else {
-        detailEl.textContent = `⚠ 「${item.title.slice(0, 20)}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
-      }
-    } catch (e) {
-      detailEl.textContent = `⚠ 連線錯誤：${e.message || e}，繼續下一部...`;
-    }
-
-    completed++;
-    if (completed < total) await sleep(8000);
-  }
-
-  barFill.style.width = '100%';
-  statusEl.className = 'sbox show ok';
-  msgEl.textContent = `✓ 完成！成功分析 ${successCount}／${total} 部電影`;
-  detailEl.textContent = '';
-  document.getElementById('btn-batch-analyze').disabled = false;
-  updateYtBatchBar();
-  if (successCount > 0) await loadDb();
-}
-
-async function loadKeyStatus() {
-  const el = document.getElementById('keys-status');
-  if (!el) return;
-  try {
-    const r = await apiFetch('/config/keys');
-    if (r.ok) {
-      if (r.count === 0) {
-        el.textContent = '尚未設定任何 Key';
-        el.style.color = 'var(--red)';
-      } else {
-        el.innerHTML = r.keys.map((k, i) =>
-          `<div style="padding:3px 0;color:var(--accent)">Key ${i + 1}：${k}</div>`
-        ).join('') + `<div style="margin-top:6px;color:var(--text2)">共 ${r.count} 組，額度不足時自動切換</div>`;
-      }
-    }
-  } catch (e) {
-    el.textContent = '無法取得狀態';
-  }
-}
-
-async function addKey() {
-  const inp = document.getElementById('key-add-input');
-  const st = document.getElementById('keys-save-status');
-  const key = (inp?.value || '').trim();
-  if (!key.startsWith('AIza')) {
-    st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
-    return;
-  }
-
-  st.className = 'sbox show loading';
-  st.innerHTML = '<span class="spin"></span> 新增中...';
-
-  try {
-    const r = await apiFetch('/config/keys/add', {
-      method: 'POST',
-      body: JSON.stringify({ key })
-    });
-    if (!r.ok) throw new Error(r.error || '新增失敗');
-    st.className = 'sbox show ok';
-    st.textContent = r.added ? `✓ 已新增 1 組 Key，目前共 ${r.count} 組` : `✓ 這組 Key 已存在，目前共 ${r.count} 組`;
-    inp.value = '';
-    loadKeyStatus();
-  } catch (e) {
-    st.className = 'sbox show err';
-    st.textContent = '✗ 新增失敗：' + e.message;
-  }
-}
-
-async function saveKeys() {
-  const raw = document.getElementById('keys-input').value.trim();
-  const keys = raw.split('\n').map(k => k.trim()).filter(k => k.startsWith('AIza'));
-  const st = document.getElementById('keys-save-status');
-
-  if (keys.length === 0) {
-    st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
-    return;
-  }
-
-  st.className = 'sbox show loading';
-  st.innerHTML = '<span class="spin"></span> 儲存中...';
-
-  try {
-    const r = await apiFetch('/config/keys', {
-      method: 'POST',
-      body: JSON.stringify({ keys })
-    });
-    if (r.ok) {
-      st.className = 'sbox show ok';
-      st.textContent = `✓ 已儲存 ${r.count} 組 Key，立即生效`;
-      document.getElementById('keys-input').value = '';
-      loadKeyStatus();
-    } else {
-      throw new Error(r.error);
-    }
-  } catch (e) {
-    st.className = 'sbox show err';
-    st.textContent = '✗ 儲存失敗：' + e.message;
-  }
-}
-
-async function loadSheetCards() {
-  try {
-    const res = await apiFetch("/api/sheets_card");
-    return res || [];
-  } catch (e) {
-    return [];
-  }
-}
-
-async function getUser(userName) {
-  try {
-    const res = await apiFetch("/api/user/get", {
-      method: "POST",
-      body: JSON.stringify({ userName })
-    });
-    return res.user;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function likeMovie(userName, movieId) {
-  try {
-    await apiFetch("/api/user/like", {
-      method: "POST",
-      body: JSON.stringify({ userName, movieId })
-    });
-    toast("已記錄喜歡", "ok");
-    return true;
-  } catch (e) {
-    toast("喜歡失敗", "err");
-    return false;
-  }
-}
-
-async function dislikeMovie(userName, movieId) {
-  try {
-    await apiFetch("/api/user/dislike", {
-      method: "POST",
-      body: JSON.stringify({ userName, movieId })
-    });
-    toast("已記錄不喜歡", "err");
-    return true;
-  } catch (e) {
-    toast("不喜歡失敗", "err");
-    return false;
-  }
-}
-
-async function getRecommendCards(userName, limit = 20) {
-  try {
-    const res = await apiFetch("/api/sheets_card/recommend", {
-      method: "POST",
-      body: JSON.stringify({ userName, limit })
-    });
-    return res || [];
-  } catch (e) {
-    return [];
-  }
-}
-
-async function renderAppCards(cards) {
+function renderAppCards(cards) {
   const grid = document.getElementById("app-cards-grid");
   const status = document.getElementById("app-status");
 
@@ -2133,14 +1827,14 @@ async function renderAppCards(cards) {
     html += `
       <div class="yt-card">
         <img class="yt-thumb" src="${poster}" alt="${c.title}" 
-             onerror="this.src='https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=載入失敗'">
+            onerror="this.src='https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=載入失敗'">
         <div class="yt-info">
           <div class="yt-title">${c.title} ${c.year ? `(${c.year})` : ''}</div>
           <div style="font-size:10px;color:#888;margin-top:4px">
             ${c.genres.slice(0, 2).join("、")}
           </div>
         </div>
-        <div style="padding:8px;display:flex;gap:6px">
+        <div style="padding:8px;display:flex;gap:6px;background:rgba(0,0,0,0.7)">
           <button class="btn btn-sm" onclick="likeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👍 喜歡</button>
           <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👎 不喜歡</button>
         </div>
