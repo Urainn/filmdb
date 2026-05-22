@@ -1823,26 +1823,27 @@ function renderAppCards(cards) {
 
   let html = "";
   for (const c of cards) {
+    // 為每張卡片獨立判斷最適合的圖片來源
     const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
-const YT_IMG = "https://img.youtube.com/vi/";
-let poster;
+    const YT_IMG = "https://img.youtube.com/vi/";
+    let poster;
 
-// 1. 優先使用 TMDB 海報
-if (c.poster && c.poster.trim()) {
-  poster = c.poster.startsWith("/") ? (TMDB_IMG + c.poster) : c.poster;
-}
-// 2. 只有「真 YouTube ID」才走 YouTube 圖片
-else if (c.ytId && c.ytId.trim() && !c.ytId.startsWith("tmdb-")) {
-  poster = YT_IMG + c.ytId + "/hqdefault.jpg";
-}
-// 3. 都沒有 → 用內聯 SVG 佔位圖
-else {
-  poster = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='500' height='280'%3E%3Crect fill='%231a1a1a' width='100%25' height='100%25'/%3E%3Ctext fill='%23e8e6e1' font-family='sans-serif' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3E無海報%3C/text%3E%3C/svg%3E";
-}
+    // 邏輯 1: 優先使用 TMDB 的 poster (最準確)
+    if (c.poster && c.poster.trim()) {
+      poster = c.poster.startsWith("/") ? (TMDB_IMG + c.poster) : c.poster;
+    }
+    // 邏輯 2: 如果 TMDB 沒有 poster，再檢查是否為真正的 YouTube ID
+    else if (c.ytId && c.ytId.trim() && !c.ytId.startsWith("tmdb-")) {
+      poster = YT_IMG + c.ytId + "/hqdefault.jpg";
+    }
+    // 邏輯 3: 如果都沒有，使用內嵌的 SVG 佔位圖 (保證不會 404)
+    else {
+      poster = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='500' height='280' viewBox='0 0 500 280'%3E%3Crect fill='%231a1a1a' width='500' height='280'/%3E%3Ctext fill='%23e8e6e1' font-family='sans-serif' font-size='24' x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle'%3E無海報%3C/text%3E%3C/svg%3E";
+    }
+
     html += `
       <div class="yt-card">
-        <img class="yt-thumb" src="${poster}" alt="${c.title}" 
-            onerror="this.src='https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=載入失敗'">
+        <img class="yt-thumb" src="${poster}" alt="${c.title}" onerror="this.style.background='#222'">
         <div class="yt-info">
           <div class="yt-title">${c.title} ${c.year ? `(${c.year})` : ''}</div>
           <div style="font-size:10px;color:#888;margin-top:4px">
@@ -1858,6 +1859,7 @@ else {
   }
   grid.innerHTML = html;
 }
+
 
 async function loadAppCards() {
   const cards = await loadSheetCards();
