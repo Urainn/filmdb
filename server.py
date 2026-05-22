@@ -23,7 +23,21 @@ import traceback
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
-SHEETS_CREDS = os.environ.get("SHEETS_CREDS", "")
+SHEETS_CREDS = SHEETS_CREDS = """
+{
+  "type": "service_account",
+  "project_id": "premium-weft-495011-d4",
+  "private_key_id": "75cca91069cd9cd2c34c69419a6b0a10334f8582",
+  "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDoy5CytRRbakG3\\n/wZKNH2T+Dg6aaABslyae3SSbi5YYshHgYOro1I3Y2MMqRiT+SIIzjH+uAFGhEXr\\nc9mQiaSg9OhfXELbR21tZlKOzd7dTNgGW/qWZvnaRED4EaZxbh+wQprkxFH53dXE\\nXUSLAk+hNPzofHDO0cCOPEolMtqIpwDygsqqwyl80N7xB8mkyXlC4yY9hcyUObEg\\nHNY3HDqm90hLOGCh0TED8UJkL1oAb3C28ivDX1V43njzN7iJ/9LU1kiqYhV9jrgK\\nqVME3snV1cNKgBEMxFFwQqQVHAzLlWe21oZt2Ga1Pie+HxvLSghUw97s1fQjn2y5\\nsoD88WPnAgMBAAECggEAIkpV8pTsvjhtHMKydPy9YK3n7ma/nHBe5px3w9f5+Kf4\\nU1wW/pHMmv8HSIah6a4BXuWshJYrDe2O9Qs4CWvU9aaNkfpfmLgxPLOdRo65nMRk\\nb69dvojFleqG3WOQLlYn0clF0pu+bX1JLycD4SwCeb753+7wmO5ZnDnyO/99JDKZ\\nbCympXDnCvo8N1km9v0t0QvJO5TEgbTknWBEgrYI6MbB3aTwsDw7LY3DxCLUkNmU\\nrrbwpSIEC0iIxdBEr93SoxR9iv64JtCToLf+zEECeU2ifvEHcQPAcA8Bjv3Pf6cJ\\nflWK4aZJaAbDiSWttG/7VwROp5YmwUI0oQJ6/1MfnQKBgQD1bLecz2NzxEztk0a+\\nPH+bgBKZ8OWmREg/7TtDth9Aql399i38sckXslF2/KzH3DINpd331A8vJDrE/5vj\\niNgn5VxKmg6i2GrlDFySlqlZg/UCbwUQ7f6uld0zHnf0drm2kPdqeUWIX+zc6/6I\\n0KJqg3vztpM5hgsZRo+d3jTgGwKBgQDy04gk54SqEaNSoqCJkTQPRAnVrjpyip5q\\nkz2YhjKsjnzstbvK+NnujLJPO3kO+XKcCOGfMEDo8drElT19ujCvHWCY69DWpZkU\\nNW3mW/E9SgnqfW48F2vRZhYAN+8XN/ppBR6n7iAKTniePQGC3abCsSmkmFHBkN1Z\\nQ9LdxLcAJQKBgQCU5eWsJIKxDMqjZLQJ3MiKvjQK44Vgz5KJ/lLzbL4fTH2EA+S4\\np+BaGRyltPzasLRJZXV601R3BGMHfBDHBhImelf5BuiUUfrghhRv9yo9nfp7BIIt\\nWEcpAtFWH0klrxZTNjZ1iafu6kvZaPBfbzzqpGUCYqWFw9Zd+lpNrC+mOwKBgQCh\\nOxkLv/nTXpC+HqNPlG0nsbqB+gRu52GWTBu6+WgOMTH7jhOaCq/Rd/QxLcEM005p\\nEnCU3VpMEcJ7gshogccvjucDwphQ3XWN+If3S5cbZdy9qPkXx0lcqVb0YC9NkGqh\\nbrfTMwZtMXtfPgyR0xCV90I6OrUWPFTsn18UxzfnTQKBgQDOOF0jbTJ9DMOnIGMm\\nKSVc8pGLfxq8uOkLoNEyihnKif77kLg9x8UJhNFAoiUhmZvbF44zfIfXy9RtEjuo\\n1etaLv6Yrn/LYyPIIFaT0RLYq4Ykmnj/dF197FJcaLPnubk0oY0b8SwFu6XvBgZs\\nRszwbF2m/OKO1AV4l+qybY72xw==\\n-----END PRIVATE KEY-----\\n",
+  "client_email": "filmdbreader@premium-weft-495011-d4.iam.gserviceaccount.com",
+  "client_id": "104010324652851159714",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/filmdbreader%40premium-weft-495011-d4.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
+"""
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
 SHEET_NAME = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET = "config"
