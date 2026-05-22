@@ -701,13 +701,20 @@ function go(name, el) {
 async function getMoviePoster(card) {
   const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
   const YT_IMG = "https://img.youtube.com/vi/";
+
+  // 1. 优先用 TMDB 海报（最正确）
   if (card.poster && card.poster.trim()) {
     return card.poster.startsWith("/") ? (TMDB_IMG + card.poster) : card.poster;
   }
-  if (card.ytId && card.ytId.trim()) {
+
+  // 2. 只有「真 YouTube ID」才走 YouTube 图片
+  // 👉 关键修复：排除 tmdb-xxx 这种假 YouTube ID
+  if (card.ytId && card.ytId.trim() && !card.ytId.startsWith("tmdb-")) {
     return YT_IMG + card.ytId + "/hqdefault.jpg";
   }
-  return "https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=無海報";
+
+  // 3. 都没有 → 用内联 SVG 占位图（完全不会 404、不会报错）
+  return "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='500' height='280'%3E%3Crect fill='%231a1a1a' width='100%25' height='100%25'/%3E%3Ctext fill='%23e8e6e1' font-family='sans-serif' font-size='24' x='50%25' y='50%25' text-anchor='middle' dy='.3em'%3E無海報%3C/text%3E%3C/svg%3E";
 }
 
 function renderList() {
