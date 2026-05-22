@@ -827,6 +827,14 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
+
+        elif path == "/admin":
+    if os.path.exists("admin.html"):
+        with open("admin.html", "r", encoding="utf-8") as f:
+            self.send_html(f.read())
+    else:
+        self.send_json(404, {"ok": False, "error": "admin.html not found"})
+      
         elif path == "/config/keys":
             keys = get_gemini_keys()
             masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
