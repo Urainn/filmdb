@@ -1,2 +1,5 @@
 cryptography
 httpx
+flask
+pandas
+scikit-learn
