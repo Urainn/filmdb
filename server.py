@@ -63,8 +63,8 @@ YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7w
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
 
 
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-MODEL_FALLBACKS = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
 
 PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物件，絕對不要加任何說明文字或 markdown。
@@ -1185,11 +1185,11 @@ def gemini_generate_with_retry(payload, timeout=120):
 
             if err_text and "location is not supported" in err_text.lower():
                 region_hits += 1
-                break
+                continue
             if status in (429, 403):
                 quota_hits += 1
-                time.sleep(2)
-                break
+                time.sleep(1)
+                continue
             if status == 503:
                 time.sleep(6)
                 break
