@@ -201,6 +201,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="nav-item" onclick="go('sheets',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/></svg>APP 電影卡片
     </div>
+    <div class="nav-item" onclick="go('admin-push',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v10H2z"/><path d="M5 7h6M5 10h4"/></svg>後台分析推送
+    </div>
 
     <div class="nav-label" style="margin-top:6px">工具</div>
     <div class="nav-item" onclick="go('io',this)">
@@ -445,11 +448,82 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div class="btn-row">
         <button class="btn" onclick="loadAppCards()">載入全部 APP 卡片</button>
         <button class="btn btn-accent" onclick="loadAppRecommend()">載入個人化推薦</button>
+        <button class="btn" onclick="loadUserAnalyze()">喜好分析（含推薦理由）</button>
+        <button class="btn btn-sm" onclick="loadUserStats()">全站喜好統計</button>
       </div>
+      <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5">
+        喜歡／不喜歡會寫入 Google Sheets 工作表 <code>user_prefs</code>，重啟伺服器後仍保留。推薦依你已喜歡影片的類型、情緒、場景標籤加權計分。<br>
+        <b>APP 海報請打 API</b>（勿直接讀 Sheets 原始 JSON）：<code>GET /api/sheets_card</code> 回傳的 <code>poster</code> 與 <code>thumb</code> 已與後台相同（TMDB／YouTube 自動補圖）。
+      </p>
     </div>
 
     <div id="app-status" style="margin-bottom:16px"></div>
+    <div id="app-profile" style="margin-bottom:16px;display:none"></div>
     <div id="app-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px"></div>
+  </div>
+
+  <!-- ADMIN PUSH -->
+  <div id="panel-admin-push" class="panel">
+    <div class="page-head">
+      <div>
+        <div class="page-title">後台分析推送 · 多人同步</div>
+        <div class="page-sub">接收（<code>user_prefs</code>）→ 統計（<code>user_events</code>）→ 同步推薦（<code>push_feed</code>）</div>
+      </div>
+    </div>
+
+    <div style="max-width:900px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px" id="admin-push-stats">
+        <div class="sbox show" style="font-size:12px">載入中…</div>
+      </div>
+      <div class="field-row" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px">
+        <div class="field" style="flex:1;min-width:140px">
+          <label class="fl">推送則數</label>
+          <input class="fi" id="admin-push-limit" type="number" value="20" min="1" max="50">
+        </div>
+        <div class="field" style="flex:2;min-width:200px">
+          <label class="fl">推送訊息（選填，APP 可顯示）</label>
+          <input class="fi" id="admin-push-message" type="text" placeholder="例如：本週為你精選的恐怖片">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn" onclick="loadAdminPushDashboard()">重新整理</button>
+        <button class="btn btn-accent" onclick="adminPublishAll()">一鍵推送全部有喜歡的使用者</button>
+        <button class="btn btn-accent" onclick="adminRepublishStale()">同步過期推薦（喜好已變）</button>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.55">
+        <b>APP 多人同步（建議）：</b><br>
+        上傳喜好：<code>POST /api/sync/push</code> · 拉取全部：<code>POST /api/sync/pull</code><br>
+        已發布推薦：<code>GET /api/push/feed?userName=名稱</code> · 全站總覽：<code>GET /api/admin/multi/overview</code>
+      </p>
+      <div id="admin-multi-events" style="margin-top:10px;font-size:10px;color:var(--text3);max-width:900px;max-height:80px;overflow:auto"></div>
+    </div>
+
+    <div id="admin-push-log" style="margin-bottom:12px;font-size:11px;font-family:'DM Mono',monospace;max-width:900px"></div>
+
+    <div style="overflow:auto;max-width:100%">
+      <table class="tbl" id="admin-push-table" style="width:100%;max-width:900px;font-size:12px">
+        <thead>
+          <tr>
+            <th>使用者</th>
+            <th>喜歡</th>
+            <th>不喜歡</th>
+            <th>上次推送</th>
+            <th>卡片數</th>
+            <th>狀態</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="admin-push-tbody">
+          <tr><td colspan="7" style="color:var(--text3)">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="admin-push-preview" style="display:none;margin-top:20px;max-width:900px">
+      <div class="page-sub" style="margin-bottom:8px" id="admin-push-preview-title">推送預覽</div>
+      <div id="admin-push-preview-profile" style="margin-bottom:12px"></div>
+      <div id="admin-push-preview-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px"></div>
+    </div>
   </div>
 
   <!-- SETTINGS -->
@@ -585,11 +659,10 @@ let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
 let reanalyzeRunning = false;
 
-let userBehaviorDB = [];
+// 與後端 recommend_engine.DEFAULT_WEIGHTS 對齊（展示用說明）
 const WEIGHT_LIKE_MOOD = 2;
 const WEIGHT_LIKE_GENRE = 3;
 const WEIGHT_LIKE_SCENE = 1;
-const WEIGHT_DISLIKE = -2;
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(API + path, {
@@ -661,12 +734,13 @@ function go(name, el) {
   document.getElementById('panel-'+name).classList.add('active');
   if (el) el.classList.add('active');
   else {
-    const map = {list:0, add:1, 'search-yt':2, io:3, settings:4, sheets:5};
+    const map = {list:0, add:1, 'search-yt':2, sheets:3, 'admin-push':4, io:5, settings:6};
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
   if (name === 'add') resetAdd();
   if (name === 'settings') loadKeyStatus();
+  if (name === 'admin-push') loadAdminPushDashboard();
 }
 
 const PLACEHOLDER_POSTER = "data:image/svg+xml," + encodeURIComponent(
@@ -2392,11 +2466,10 @@ async function loadSheetCards() {
 
 async function getUser(userName) {
   try {
-    const res = await apiFetch("/api/user/get", {
+    return await apiFetch("/api/user/get", {
       method: "POST",
       body: JSON.stringify({ userName })
     });
-    return res.user;
   } catch (e) {
     return null;
   }
@@ -2442,34 +2515,125 @@ async function getRecommendCards(userName, limit = 20) {
   }
 }
 
-// ✅ 修復：APP 電影卡片海報自動顯示
-async function renderAppCards(cards) {
+async function getUserAnalyze(userName, limit = 20) {
+  return apiFetch("/api/user/analyze", {
+    method: "POST",
+    body: JSON.stringify({ userName, limit })
+  });
+}
+
+async function getUserStats() {
+  const res = await fetch(API + "/api/user/stats");
+  return res.json();
+}
+
+function renderUserProfile(profile, coldStart, detailed = false) {
+  const el = document.getElementById("app-profile");
+  if (!profile) {
+    el.style.display = "none";
+    return;
+  }
+  const genres = (profile.topGenres || []).map(x => x.tag).join("、") || "—";
+  const moods = (profile.topMoods || []).map(x => x.tag).join("、") || "—";
+  const scenes = (profile.topScenes || []).map(x => x.tag).join("、") || "—";
+  const avoid = (profile.avoidGenres || []).map(x => x.tag).join("、") || "—";
+  const liked = (profile.likedTitles || []).slice(0, 8).join("、") || "尚無";
+  const disliked = (profile.dislikedTitles || []).slice(0, 5).join("、") || "—";
+  el.style.display = "block";
+  el.innerHTML = `
+    <div class="sbox show ${detailed ? "ok" : ""}" style="font-size:12px;line-height:1.6">
+      ${detailed ? "<div style='font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px'>📊 喜好分析報告</div>" : ""}
+      ${coldStart ? "<div style='color:var(--warn);margin-bottom:6px'>尚未標記喜歡，目前為冷啟動（顯示片庫前幾部）</div>" : ""}
+      <div><b>已喜歡</b> ${profile.likeCount || 0} 部 · <b>不喜歡</b> ${profile.dislikeCount || 0} 部</div>
+      <div style="margin-top:4px"><b>偏好類型</b>：${genres}</div>
+      <div><b>偏好情緒／關鍵詞</b>：${moods}</div>
+      ${detailed ? `<div><b>偏好場景</b>：${scenes}</div>
+      <div style="margin-top:4px"><b>會避開的類型</b>：${avoid}</div>
+      <div style="margin-top:4px;color:var(--text3)"><b>不喜歡</b>：${disliked}</div>` : ""}
+      <div style="margin-top:4px;color:var(--text3)"><b>近期喜歡</b>：${liked}</div>
+      ${detailed ? `<div style="margin-top:8px;font-size:10px;color:var(--text3)">下方卡片依標籤加權排序（類型×${WEIGHT_LIKE_GENRE}、情緒×${WEIGHT_LIKE_MOOD}、場景×${WEIGHT_LIKE_SCENE}）</div>` : ""}
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// APP 卡片：mode=recommend 簡潔列表；mode=analyze 排名＋分數＋推薦理由標籤
+async function renderAppCards(cards, opts = {}) {
   const grid = document.getElementById("app-cards-grid");
   const status = document.getElementById("app-status");
+  const mode = opts.mode || "list";
+  const appUser = (document.getElementById("app-user")?.value || "guest").replace(/'/g, "\\'");
 
   if (!cards.length) {
-    grid.innerHTML = "<div style='color:#888'>無資料</div>";
+    grid.innerHTML = "<div style='color:#888'>無資料（可先標記幾部喜歡再載入推薦）</div>";
     return;
   }
 
-  status.innerHTML = `<div class='sbox show ok'>共 ${cards.length} 張 APP 卡片</div>`;
+  const label = opts.label || `共 ${cards.length} 張 APP 卡片`;
+  status.innerHTML = `<div class='sbox show ok'>${label}</div>`;
 
   let html = "";
+  let rank = 0;
   for (const c of cards) {
+    rank += 1;
     const poster = await getMoviePoster(c);
+    const title = escapeHtml(c.title);
+    const reasons = (c.matchReasons || []).slice(0, 5);
+
+    let metaBlock = `
+      <div style="font-size:10px;color:#888;margin-top:4px">
+        ${escapeHtml(c.year || movieYear(c) || "—")} · ${escapeHtml((c.genres || []).slice(0, 2).join("、"))}
+      </div>`;
+
+    if (mode === "analyze") {
+      const chips = reasons.length
+        ? reasons.map(r =>
+            `<span style="display:inline-block;margin:3px 4px 0 0;padding:2px 6px;border-radius:4px;font-size:10px;background:var(--accent-dim);color:var(--accent);border:1px solid rgba(212,242,122,0.35)">${escapeHtml(r)}</span>`
+          ).join("")
+        : `<span style="font-size:10px;color:var(--text3)">標籤相近（分數 ${c.score ?? "—"}）</span>`;
+      const scoreBadge = c.score != null
+        ? `<span style="float:right;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--accent);color:var(--accent-text)">${c.score} 分</span>`
+        : "";
+      metaBlock = `
+        <div class="yt-title" style="display:flex;align-items:flex-start;gap:6px">
+          <span style="flex-shrink:0;font-size:11px;font-weight:700;color:var(--accent);min-width:22px">#${rank}</span>
+          <span style="flex:1">${title}${scoreBadge}</span>
+        </div>
+        <div style="font-size:10px;color:#888;margin-top:2px">
+          ${escapeHtml(c.year || movieYear(c) || "—")} · ${escapeHtml((c.genres || []).slice(0, 2).join("、"))}
+        </div>
+        <div style="margin-top:6px;line-height:1.4"><span style="font-size:9px;color:var(--text3)">推薦理由：</span>${chips}</div>`;
+      html += `
+      <div class="yt-card" style="border-color:rgba(212,242,122,0.25)">
+        <img class="yt-thumb" src="${poster}" alt="${title}"
+             onerror="this.onerror=null;this.src=PLACEHOLDER_POSTER">
+        <div class="yt-info">${metaBlock}</div>
+        <div style="padding:8px;display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="likeMovie('${appUser}','${c.id}')">👍 喜歡</button>
+          <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${appUser}','${c.id}')">👎 不喜歡</button>
+        </div>
+      </div>`;
+      continue;
+    }
+
     html += `
       <div class="yt-card">
-        <img class="yt-thumb" src="${poster}" alt="${c.title}" 
+        <img class="yt-thumb" src="${poster}" alt="${title}"
              onerror="this.onerror=null;this.src=PLACEHOLDER_POSTER">
         <div class="yt-info">
-          <div class="yt-title">${c.title}</div>
-          <div style="font-size:10px;color:#888;margin-top:4px">
-            ${c.year || movieYear(c) || '—'} · ${(c.genres || []).slice(0,2).join("、")}
-          </div>
+          <div class="yt-title">${title}</div>
+          ${metaBlock}
         </div>
         <div style="padding:8px;display:flex;gap:6px">
-          <button class="btn btn-sm" onclick="likeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👍 喜歡</button>
-          <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${document.getElementById("app-user").value || "guest"}','${c.id}')">👎 不喜歡</button>
+          <button class="btn btn-sm" onclick="likeMovie('${appUser}','${c.id}')">👍 喜歡</button>
+          <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${appUser}','${c.id}')">👎 不喜歡</button>
         </div>
       </div>
     `;
@@ -2484,13 +2648,270 @@ async function loadAppCards() {
 
 async function loadAppRecommend() {
   const user = document.getElementById("app-user").value.trim() || "guest";
+  document.getElementById("app-profile").style.display = "none";
+  const status = document.getElementById("app-status");
+  status.innerHTML = `<div class="sbox show loading"><span class="spin"></span>載入推薦中…</div>`;
+  const cards = await getRecommendCards(user);
+  await renderAppCards(cards, {
+    mode: "recommend",
+    label: `個人化推薦 · ${user} · ${cards.length} 部（簡潔列表，無評分理由）`
+  });
+}
+
+async function loadUserAnalyze() {
+  const user = document.getElementById("app-user").value.trim();
   if (!user) {
     alert("請輸入使用者名稱");
     return;
   }
-  await getUser(user);
-  const cards = await getRecommendCards(user);
-  renderAppCards(cards);
+  const status = document.getElementById("app-status");
+  const grid = document.getElementById("app-cards-grid");
+  status.innerHTML = `<div class="sbox show loading"><span class="spin"></span>分析喜好並計算推薦理由…</div>`;
+  grid.innerHTML = "";
+  try {
+    const res = await getUserAnalyze(user, 24);
+    if (!res.ok) throw new Error(res.error || "分析失敗");
+    renderUserProfile(res.profile, res.coldStart, true);
+    const recs = res.recommendations || [];
+    if (!recs.length) {
+      status.innerHTML = `<div class="sbox show">尚無可推薦影片（請先對幾部片按 👍）</div>`;
+      grid.innerHTML = "";
+      return;
+    }
+    await renderAppCards(recs, {
+      mode: "analyze",
+      label: `喜好分析 · ${user} · ${recs.length} 部（含排名、分數、推薦理由標籤）`
+    });
+  } catch (e) {
+    toast("分析失敗：" + e.message, "err");
+    status.innerHTML = `<div class="sbox show err">分析失敗</div>`;
+  }
+}
+
+async function loadUserStats() {
+  try {
+    const s = await getUserStats();
+    const users = (s.users || []).map(u =>
+      `${u.userName}（👍${u.likeCount} / 👎${u.dislikeCount}）`
+    ).join(" · ") || "尚無";
+    const genres = (s.topGenresAcrossUsers || []).map(x => x.tag).join("、") || "—";
+    document.getElementById("app-status").innerHTML = `
+      <div class="sbox show ok" style="font-size:12px;line-height:1.6">
+        <div><b>使用者</b> ${s.userCount || 0} 人 · <b>總喜歡</b> ${s.totalLikes || 0} · <b>總不喜歡</b> ${s.totalDislikes || 0}</div>
+        <div style="margin-top:4px"><b>熱門偏好類型</b>：${genres}</div>
+        <div style="margin-top:4px;color:var(--text3)">${users}</div>
+      </div>`;
+    document.getElementById("app-profile").style.display = "none";
+  } catch (e) {
+    toast("統計載入失敗", "err");
+  }
+}
+
+// =====================================================================
+// 後台分析推送
+// =====================================================================
+function adminPushApiUrl(userName) {
+  const base = (typeof API !== "undefined" ? API : "") || "";
+  const u = encodeURIComponent(userName || "使用者名稱");
+  return `${base}/api/push/feed?userName=${u}`;
+}
+
+async function loadAdminPushDashboard() {
+  const statsEl = document.getElementById("admin-push-stats");
+  const tbody = document.getElementById("admin-push-tbody");
+  const log = document.getElementById("admin-push-log");
+  try {
+    const res = await apiFetch("/api/admin/push/list");
+    if (!res.ok) throw new Error(res.error || "載入失敗");
+    const s = res.stats || {};
+    const stale = res.stalePushCount || 0;
+    statsEl.innerHTML = `
+      <div class="sbox show ok"><b>${s.userCount || 0}</b><br><span style="font-size:10px;color:var(--text3)">使用者</span></div>
+      <div class="sbox show ok"><b>${s.totalLikes || 0}</b><br><span style="font-size:10px;color:var(--text3)">總喜歡</span></div>
+      <div class="sbox show ${stale ? "err" : "ok"}"><b>${stale}</b><br><span style="font-size:10px;color:var(--text3)">待同步推薦</span></div>`;
+    const users = res.users || [];
+    const evEl = document.getElementById("admin-multi-events");
+    if (evEl) {
+      const evs = (res.recentEvents || []).slice(-8);
+      evEl.innerHTML = evs.length
+        ? "<b>近期事件</b> · " + evs.map(e =>
+            `${escapeHtml(e.userName)} ${escapeHtml(e.type)} ${escapeHtml(e.movieId || "").slice(0, 12)}`
+          ).join(" · ")
+        : "";
+    }
+    if (!users.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text3)">尚無使用者（請 APP 呼叫 sync/push 或按喜歡）</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = users.map(u => {
+      const pub = u.publishedAt ? u.publishedAt.replace("T", " ").replace("Z", " UTC") : "—";
+      const safe = escapeHtml(u.userName);
+      const status = u.pushStale
+        ? `<span style="color:var(--red)">待同步</span>`
+        : (u.hasPush ? `<span style="color:var(--accent)">已推送</span>` : "—");
+      return `<tr>
+        <td><b>${safe}</b></td>
+        <td>${u.likeCount}</td>
+        <td>${u.dislikeCount}</td>
+        <td style="font-size:10px;font-family:'DM Mono',monospace">${escapeHtml(pub)}</td>
+        <td>${u.hasPush ? u.cardCount : "—"}</td>
+        <td>${status}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm" onclick="adminPreviewPush('${safe.replace(/'/g, "\\'")}')">預覽</button>
+          <button class="btn btn-sm btn-accent" onclick="adminPublishOne('${safe.replace(/'/g, "\\'")}')">發布</button>
+          <button class="btn btn-sm" onclick="adminTestSyncPull('${safe.replace(/'/g, "\\'")}')">試同步</button>
+        </td>
+      </tr>`;
+    }).join("");
+    log.innerHTML = `<div class="sbox show">Sheets: <code>${escapeHtml(res.prefsSheet)}</code> · <code>${escapeHtml(res.feedSheet)}</code> · <code>${escapeHtml(res.eventsSheet)}</code> · ${users.filter(x => x.hasPush).length} 人已推送</div>`;
+  } catch (e) {
+    statsEl.innerHTML = `<div class="sbox show err">載入失敗</div>`;
+    tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function adminPushParams() {
+  return {
+    limit: parseInt(document.getElementById("admin-push-limit")?.value, 10) || 20,
+    message: document.getElementById("admin-push-message")?.value?.trim() || ""
+  };
+}
+
+async function adminPreviewPush(userName) {
+  const { limit, message } = adminPushParams();
+  const log = document.getElementById("admin-push-log");
+  log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>分析 ${escapeHtml(userName)}…</div>`;
+  try {
+    const res = await apiFetch("/api/admin/push/preview", {
+      method: "POST",
+      body: JSON.stringify({ userName, limit, message })
+    });
+    if (!res.ok) throw new Error(res.error || "預覽失敗");
+    renderAdminPushPreview(res);
+    log.innerHTML = `<div class="sbox show ok">預覽完成 · ${res.cardCount || 0} 部 · 尚未寫入 Sheets</div>`;
+  } catch (e) {
+    log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminPublishOne(userName) {
+  const { limit, message } = adminPushParams();
+  if (!confirm(`確定發布推送給「${userName}」？\nAPP 將透過 /api/push/feed 取得 ${limit} 部推薦。`)) return;
+  const log = document.getElementById("admin-push-log");
+  log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>發布中…</div>`;
+  try {
+    const res = await apiFetch("/api/admin/push/publish", {
+      method: "POST",
+      body: JSON.stringify({ userName, limit, message })
+    });
+    if (!res.ok) throw new Error(res.error || "發布失敗");
+    toast(`已推送給 ${userName}（${res.cardCount} 部）`, "ok");
+    log.innerHTML = `<div class="sbox show ok">已發布 ${escapeHtml(res.publishedAt || "")} · API：<code>${escapeHtml(adminPushApiUrl(userName))}</code></div>`;
+    loadAdminPushDashboard();
+    renderAdminPushPreview(res);
+  } catch (e) {
+    toast("發布失敗", "err");
+    log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminRepublishStale() {
+  const { limit, message } = adminPushParams();
+  if (!confirm(`只對「喜好已變、推送過期」的使用者重新發布？`)) return;
+  const log = document.getElementById("admin-push-log");
+  log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>同步過期推薦…</div>`;
+  try {
+    const res = await apiFetch("/api/admin/multi/republish_stale", {
+      method: "POST",
+      body: JSON.stringify({ limit, message })
+    });
+    const lines = (res.results || []).map(r =>
+      r.ok ? `✅ ${r.userName}` : (r.skipped ? `⏭ ${r.userName}: ${r.reason}` : `❌ ${r.userName}`)
+    ).join("<br>");
+    log.innerHTML = `<div class="sbox show ok">已同步 ${res.published}/${res.total}<br>${lines}</div>`;
+    toast(`已更新 ${res.published} 人推送`, "ok");
+    loadAdminPushDashboard();
+  } catch (e) {
+    log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminTestSyncPull(userName) {
+  try {
+    const res = await apiFetch("/api/sync/pull", {
+      method: "POST",
+      body: JSON.stringify({ userName, includeLiveRecommend: true, limit: 8 })
+    });
+    if (!res.ok) throw new Error(res.error || "失敗");
+    const cards = res.pushFeed?.cards || res.liveRecommendations || [];
+    renderAdminPushPreview({
+      userName,
+      profile: res.profile,
+      cards,
+      message: res.pushStale ? "推送已過期，請後台重新發布" : "",
+      cardCount: cards.length
+    });
+    toast(`同步 pull · 推送${res.hasPublishedPush ? "有" : "無"} · 過期:${res.pushStale}`, "ok");
+  } catch (e) {
+    toast("同步失敗", "err");
+  }
+}
+
+async function adminPublishAll() {
+  const { limit, message } = adminPushParams();
+  if (!confirm(`對所有「有喜歡記錄」的使用者發布推送？\n每人大約 ${limit} 部。`)) return;
+  const log = document.getElementById("admin-push-log");
+  log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>批次發布中…</div>`;
+  try {
+    const res = await apiFetch("/api/admin/push/publish_all", {
+      method: "POST",
+      body: JSON.stringify({ limit, message })
+    });
+    if (!res.ok) throw new Error(res.error || "批次失敗");
+    const lines = (res.results || []).map(r =>
+      r.ok ? `✅ ${r.userName}（${r.cardCount}）` : (r.skipped ? `⏭ ${r.userName}` : `❌ ${r.userName}: ${r.error}`)
+    ).join("<br>");
+    log.innerHTML = `<div class="sbox show ok">完成 ${res.published}/${res.total}<br>${lines}</div>`;
+    toast(`已推送 ${res.published} 位使用者`, "ok");
+    loadAdminPushDashboard();
+  } catch (e) {
+    log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminTestFeed(userName) {
+  try {
+    const res = await fetch(adminPushApiUrl(userName));
+    const data = await res.json();
+    if (!data.hasFeed) {
+      toast("尚無已發布推送", "err");
+      return;
+    }
+    renderAdminPushPreview(data);
+    toast(`APP 會收到 ${data.cardCount || data.cards?.length || 0} 部`, "ok");
+  } catch (e) {
+    toast("讀取失敗", "err");
+  }
+}
+
+function renderAdminPushPreview(doc) {
+  const box = document.getElementById("admin-push-preview");
+  const title = document.getElementById("admin-push-preview-title");
+  const prof = document.getElementById("admin-push-preview-profile");
+  const grid = document.getElementById("admin-push-preview-grid");
+  box.style.display = "block";
+  const p = doc.profile || {};
+  title.textContent = `推送預覽 · ${doc.userName || ""} · ${doc.cardCount || (doc.cards || []).length} 部`;
+  if (doc.message) title.textContent += ` · 「${doc.message}」`;
+  renderUserProfile(p, doc.coldStart, true);
+  prof.innerHTML = document.getElementById("app-profile").innerHTML;
+  const cards = doc.cards || [];
+  grid.innerHTML = cards.slice(0, 12).map((c, i) => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px;font-size:11px">
+      <div style="color:var(--accent);font-weight:700">#${i + 1} ${escapeHtml(c.score ?? "")}</div>
+      <div style="margin-top:4px;font-weight:500">${escapeHtml(c.title)}</div>
+      <div style="color:var(--text3);margin-top:4px;font-size:10px">${escapeHtml((c.matchReasons || []).slice(0, 3).join(" · "))}</div>
+    </div>`).join("") + (cards.length > 12 ? `<div style="color:var(--text3);font-size:11px;padding:8px">…另有 ${cards.length - 12} 部</div>` : "");
 }
 
 // =====================================================================

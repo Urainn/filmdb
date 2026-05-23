@@ -18,6 +18,21 @@ import base64
 import sys
 import traceback
 
+from recommend_engine import (
+    DEFAULT_WEIGHTS,
+    global_user_stats,
+    ranked_movies,
+    summarize_profile,
+)
+from user_sync import (
+    build_sync_pull_payload,
+    merge_client_prefs,
+    multi_user_overview,
+    normalize_prefs,
+    push_is_stale,
+    utc_now,
+)
+
 
 
 
@@ -40,6 +55,9 @@ SHEETS_CREDS = os.environ.get("SHEETS_CREDS") or """
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1sRXiN_W8oshYIZTaDza3A-B1MPgrpTmedoQx8VS9Dsw")
 SHEET_NAME = os.environ.get("SHEET_NAME", "films")
 CONFIG_SHEET = "config"
+USER_PREFS_SHEET = os.environ.get("USER_PREFS_SHEET", "user_prefs")
+PUSH_FEED_SHEET = os.environ.get("PUSH_FEED_SHEET", "push_feed")
+USER_EVENTS_SHEET = os.environ.get("USER_EVENTS_SHEET", "user_events")
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
@@ -81,8 +99,12 @@ _key_lock = threading.Lock()
 _key_index = 0
 _sheet_id_cache = None
 
-# 記憶存放使用者喜好（後端重啟前都有效）
+# 使用者喜好：啟動時從 Google Sheets 載入，like/dislike 時寫回
 user_behavior = {}
+_user_lock = threading.Lock()
+_user_prefs_sheet_id_cache = None
+_push_feed_cache = {}
+_push_feed_lock = threading.Lock()
 
 
 def get_access_token():
@@ -174,7 +196,7 @@ def ensure_sheet():
     try:
         info = sheets_request("GET", "")
         names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        for name in [SHEET_NAME, CONFIG_SHEET]:
+        for name in [SHEET_NAME, CONFIG_SHEET, USER_PREFS_SHEET, PUSH_FEED_SHEET, USER_EVENTS_SHEET]:
             if name not in names:
                 sheets_request("POST", ":batchUpdate", {
                     "requests": [{"addSheet": {"properties": {"title": name}}}]
@@ -346,6 +368,437 @@ def get_sheet_id():
             _sheet_id_cache = s["properties"]["sheetId"]
             return _sheet_id_cache
     return 0
+
+
+def get_user_prefs_sheet_id():
+    global _user_prefs_sheet_id_cache
+    if _user_prefs_sheet_id_cache is not None:
+        return _user_prefs_sheet_id_cache
+    info = sheets_request("GET", "")
+    for s in info.get("sheets", []):
+        if s["properties"]["title"] == USER_PREFS_SHEET:
+            _user_prefs_sheet_id_cache = s["properties"]["sheetId"]
+            return _user_prefs_sheet_id_cache
+    return 0
+
+
+def user_prefs_read_all():
+    try:
+        encoded = urllib.parse.quote(f"{USER_PREFS_SHEET}!A:B")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        out = {}
+        for row in rows:
+            if len(row) < 2:
+                continue
+            name = str(row[0]).strip()
+            if not name or name.lower() == "username":
+                continue
+            try:
+                data = json.loads(row[1])
+                out[name] = normalize_prefs(data)
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        print(f"  user_prefs_read_all 錯誤: {e}")
+        return {}
+
+
+def user_prefs_find_row(user_name):
+    try:
+        encoded = urllib.parse.quote(f"{USER_PREFS_SHEET}!A:A")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        for i, row in enumerate(rows):
+            if row and str(row[0]).strip() == user_name:
+                return i + 1
+    except Exception as e:
+        print(f"  user_prefs_find_row 錯誤: {e}")
+    return None
+
+
+def user_prefs_save_one(user_name, prefs):
+    ensure_sheet()
+    normalized = normalize_prefs(prefs)
+    if not normalized.get("updatedAt"):
+        normalized["updatedAt"] = utc_now()
+    if not normalized.get("lastSyncAt"):
+        normalized["lastSyncAt"] = normalized["updatedAt"]
+    payload = json.dumps(normalized, ensure_ascii=False)
+    row_num = user_prefs_find_row(user_name)
+    if row_num:
+        encoded = urllib.parse.quote(f"{USER_PREFS_SHEET}!B{row_num}")
+        sheets_request(
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
+            {"values": [[payload]]},
+        )
+    else:
+        encoded = urllib.parse.quote(f"{USER_PREFS_SHEET}!A:B")
+        sheets_request(
+            "POST",
+            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            {"values": [[user_name, payload]]},
+        )
+
+
+def load_user_behavior_from_sheets():
+    global user_behavior
+    loaded = user_prefs_read_all()
+    with _user_lock:
+        user_behavior = loaded
+    print(f"  已載入 {len(loaded)} 位使用者喜好（{USER_PREFS_SHEET}）")
+
+
+def get_user_prefs(user_name):
+    with _user_lock:
+        if user_name not in user_behavior:
+            user_behavior[user_name] = normalize_prefs({})
+        else:
+            user_behavior[user_name] = normalize_prefs(user_behavior[user_name])
+        return user_behavior[user_name]
+
+
+def persist_user_prefs(user_name):
+    with _user_lock:
+        prefs = user_behavior.get(user_name)
+    if not prefs:
+        return
+    try:
+        user_prefs_save_one(user_name, prefs)
+    except Exception as e:
+        print(f"  persist_user_prefs 錯誤 ({user_name}): {e}")
+
+
+def movie_to_sheets_card(m, score=None, match_reasons=None):
+    # poster / thumb 皆填入解析後 URL，與後台列表一致（APP 讀任一欄即可）
+    image_url = resolve_movie_poster(m)
+    card = {
+        "id": m.get("id", ""),
+        "title": m.get("title", ""),
+        "year": m.get("year")
+        or (str(m.get("publishedAt", ""))[:4] if m.get("publishedAt") else ""),
+        "poster": image_url,
+        "thumb": image_url,
+        "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
+        "genres": m.get("genres", []),
+        "moods": m.get("moods", []),
+        "actors": m.get("actors") or m.get("cast", ""),
+        "url": m.get("url", ""),
+        "ytId": m.get("ytId", ""),
+        "tmdbId": m.get("tmdbId", ""),
+        "mediaType": m.get("mediaType", "movie"),
+    }
+    if score is not None:
+        card["score"] = round(score, 2)
+    if match_reasons:
+        card["matchReasons"] = match_reasons
+    return card
+
+
+def build_recommend_cards(movies, user_prefs, limit=20):
+    ranked, meta = ranked_movies(movies, user_prefs, limit=limit, weights=DEFAULT_WEIGHTS)
+    cards = [movie_to_sheets_card(m, score=s, match_reasons=reasons) for s, m, reasons in ranked]
+    return cards, meta
+
+
+def parse_query_string(path_with_query):
+    if "?" not in path_with_query:
+        return {}
+    qs = path_with_query.split("?", 1)[1]
+    return {k: v[0] for k, v in urllib.parse.parse_qs(qs).items()}
+
+
+def push_feed_read_all():
+    try:
+        encoded = urllib.parse.quote(f"{PUSH_FEED_SHEET}!A:B")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        out = {}
+        for row in rows:
+            if len(row) < 2:
+                continue
+            name = str(row[0]).strip()
+            if not name or name.lower() == "username":
+                continue
+            try:
+                out[name] = json.loads(row[1])
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        print(f"  push_feed_read_all 錯誤: {e}")
+        return {}
+
+
+def push_feed_find_row(user_name):
+    try:
+        encoded = urllib.parse.quote(f"{PUSH_FEED_SHEET}!A:A")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        for i, row in enumerate(rows):
+            if row and str(row[0]).strip() == user_name:
+                return i + 1
+    except Exception as e:
+        print(f"  push_feed_find_row 錯誤: {e}")
+    return None
+
+
+def push_feed_save_one(user_name, feed_doc):
+    ensure_sheet()
+    payload = json.dumps(feed_doc, ensure_ascii=False)
+    row_num = push_feed_find_row(user_name)
+    if row_num:
+        encoded = urllib.parse.quote(f"{PUSH_FEED_SHEET}!B{row_num}")
+        sheets_request(
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
+            {"values": [[payload]]},
+        )
+    else:
+        encoded = urllib.parse.quote(f"{PUSH_FEED_SHEET}!A:B")
+        sheets_request(
+            "POST",
+            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            {"values": [[user_name, payload]]},
+        )
+    with _push_feed_lock:
+        _push_feed_cache[user_name] = feed_doc
+
+
+def load_push_feed_from_sheets():
+    global _push_feed_cache
+    loaded = push_feed_read_all()
+    with _push_feed_lock:
+        _push_feed_cache = loaded
+    print(f"  已載入 {len(loaded)} 筆推送快取（{PUSH_FEED_SHEET}）")
+
+
+def push_feed_get(user_name):
+    with _push_feed_lock:
+        cached = _push_feed_cache.get(user_name)
+    if cached:
+        return cached
+    all_feeds = push_feed_read_all()
+    doc = all_feeds.get(user_name)
+    if doc:
+        with _push_feed_lock:
+            _push_feed_cache[user_name] = doc
+    return doc
+
+
+def admin_build_push_payload(user_name, limit=20, message=""):
+    movies = db_read()
+    u = get_user_prefs(user_name)
+    cards, meta = build_recommend_cards(movies, u, limit=limit)
+    return {
+        "userName": user_name,
+        "publishedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "message": (message or "").strip(),
+        "limit": limit,
+        "coldStart": bool(meta.get("coldStart")),
+        "profile": meta.get("profile") or summarize_profile(
+            {m["id"]: m for m in movies if m.get("id")}, u
+        ),
+        "cards": cards,
+        "cardCount": len(cards),
+    }
+
+
+def admin_publish_push(user_name, limit=20, message=""):
+    doc = admin_build_push_payload(user_name, limit=limit, message=message)
+    push_feed_save_one(user_name, doc)
+    return doc
+
+
+def user_events_append(user_name, events, device_id=""):
+    if not events:
+        return
+    ensure_sheet()
+    values = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        values.append([
+            json.dumps(
+                {
+                    "at": utc_now(),
+                    "userName": user_name,
+                    "deviceId": device_id or ev.get("deviceId") or "",
+                    "type": ev.get("type") or ev.get("action") or "event",
+                    "movieId": ev.get("movieId") or ev.get("movie_id") or "",
+                },
+                ensure_ascii=False,
+            )
+        ])
+    if not values:
+        return
+    encoded = urllib.parse.quote(f"{USER_EVENTS_SHEET}!A:A")
+    sheets_request(
+        "POST",
+        f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+        {"values": values},
+    )
+
+
+def user_events_read_recent(limit=50):
+    try:
+        encoded = urllib.parse.quote(f"{USER_EVENTS_SHEET}!A:A")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        events = []
+        for row in reversed(rows[-limit:]):
+            if not row:
+                continue
+            try:
+                events.append(json.loads(row[0]))
+            except Exception:
+                pass
+        return list(reversed(events))
+    except Exception as e:
+        print(f"  user_events_read_recent 錯誤: {e}")
+        return []
+
+
+def admin_push_dashboard():
+    load_user_behavior_from_sheets()
+    feeds = push_feed_read_all()
+    with _push_feed_lock:
+        _push_feed_cache.update(feeds)
+    with _user_lock:
+        users_snapshot = {k: normalize_prefs(v) for k, v in user_behavior.items()}
+    movies = db_read()
+    overview = multi_user_overview(
+        users_snapshot,
+        feeds,
+        movies,
+        user_events_read_recent(40),
+    )
+    users = []
+    for row in overview.get("users") or []:
+        feed = feeds.get(row["userName"]) or {}
+        users.append({
+            **row,
+            "message": feed.get("message", ""),
+        })
+    return {
+        "stats": overview.get("stats"),
+        "users": users,
+        "stalePushCount": overview.get("stalePushCount", 0),
+        "recentEvents": overview.get("recentEvents", []),
+        "feedSheet": PUSH_FEED_SHEET,
+        "prefsSheet": USER_PREFS_SHEET,
+        "eventsSheet": USER_EVENTS_SHEET,
+    }
+
+
+def admin_republish_stale_users(limit=20, message=""):
+    load_user_behavior_from_sheets()
+    feeds = push_feed_read_all()
+    results = []
+    with _user_lock:
+        names = list(user_behavior.keys())
+    for name in names:
+        prefs = normalize_prefs(user_behavior.get(name) or {})
+        feed = feeds.get(name)
+        if not push_is_stale(prefs, feed):
+            results.append({"userName": name, "ok": False, "skipped": True, "reason": "推送仍為最新"})
+            continue
+        if not prefs.get("like"):
+            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無喜歡"})
+            continue
+        try:
+            doc = admin_publish_push(name, limit=limit, message=message)
+            results.append({
+                "userName": name,
+                "ok": True,
+                "cardCount": doc.get("cardCount", 0),
+            })
+        except Exception as e:
+            results.append({"userName": name, "ok": False, "error": str(e)})
+    ok_n = sum(1 for r in results if r.get("ok"))
+    return {"ok": True, "published": ok_n, "total": len(results), "results": results}
+
+
+def handle_sync_pull(body):
+    user_name = (body.get("userName") or "").strip()
+    if not user_name:
+        return 400, {"ok": False, "error": "缺少 userName"}
+    include_live = bool(body.get("includeLiveRecommend"))
+    limit = int(body.get("limit") or 20)
+    prefs = get_user_prefs(user_name)
+    feed = push_feed_get(user_name)
+    movies = db_read()
+    live_cards = None
+    live_meta = None
+    if include_live:
+        live_cards, live_meta = build_recommend_cards(movies, prefs, limit=limit)
+    payload = build_sync_pull_payload(
+        user_name,
+        prefs,
+        feed,
+        movies,
+        include_live=include_live,
+        live_cards=live_cards,
+        live_meta=live_meta,
+    )
+    return 200, payload
+
+
+def handle_sync_push(body):
+    user_name = (body.get("userName") or "").strip()
+    if not user_name:
+        return 400, {"ok": False, "error": "缺少 userName"}
+    device_id = (body.get("deviceId") or "").strip()
+    with _user_lock:
+        server_prefs = normalize_prefs(user_behavior.get(user_name) or {})
+    merged = merge_client_prefs(server_prefs, body)
+    with _user_lock:
+        user_behavior[user_name] = merged
+    persist_user_prefs(user_name)
+    events = body.get("events") or []
+    if events:
+        user_events_append(user_name, events, device_id)
+    auto_publish = bool(body.get("autoPublishRecommend"))
+    limit = int(body.get("limit") or 20)
+    message = (body.get("message") or "").strip()
+    published = None
+    if auto_publish and merged.get("like"):
+        published = admin_publish_push(user_name, limit=limit, message=message)
+    feed = push_feed_get(user_name)
+    movies = db_read()
+    payload = build_sync_pull_payload(user_name, merged, feed, movies)
+    payload["merged"] = True
+    if published:
+        payload["published"] = True
+        payload["pushFeed"] = published
+        payload["pushStale"] = False
+    return 200, payload
+
+
+def admin_publish_push_all(limit=20, message=""):
+    load_user_behavior_from_sheets()
+    results = []
+    with _user_lock:
+        names = list(user_behavior.keys())
+    for name in names:
+        prefs = user_behavior.get(name) or {}
+        if not (prefs.get("like")):
+            results.append({
+                "userName": name,
+                "ok": False,
+                "skipped": True,
+                "error": "尚無喜歡記錄",
+            })
+            continue
+        try:
+            doc = admin_publish_push(name, limit=limit, message=message)
+            results.append({
+                "userName": name,
+                "ok": True,
+                "cardCount": doc.get("cardCount", 0),
+                "publishedAt": doc.get("publishedAt"),
+            })
+        except Exception as e:
+            results.append({"userName": name, "ok": False, "error": str(e)})
+    ok_n = sum(1 for r in results if r.get("ok"))
+    return {"ok": True, "published": ok_n, "total": len(results), "results": results}
 
 
 
@@ -1009,34 +1462,60 @@ class Handler(BaseHTTPRequestHandler):
         # APP 專用：全部電影卡片
         elif path == "/api/sheets_card":
             movies = db_read()
-            sheets_card = []
-            for m in movies:
-                card = {
-                    "id": m.get("id", ""),
-                    "title": m.get("title", ""),
-                    "year": m.get("year") or (str(m.get("publishedAt", ""))[:4] if m.get("publishedAt") else ""),
-                    "poster": resolve_movie_poster(m),
-                    "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
-                    "genres": m.get("genres", []),
-                    "moods": m.get("moods", []),
-                    "actors": m.get("actors") or m.get("cast", ""),
-                    "url": m.get("url", ""),
-                    "ytId": m.get("ytId", ""),
-                    "tmdbId": m.get("tmdbId", ""),
-                    "mediaType": m.get("mediaType", "movie"),
-                }
-                sheets_card.append(card)
+            sheets_card = [movie_to_sheets_card(m) for m in movies]
             self.send_json(200, sheets_card)
+
+        elif path == "/api/user/stats":
+            movies = db_read()
+            with _user_lock:
+                snapshot = dict(user_behavior)
+            self.send_json(200, {"ok": True, **global_user_stats(snapshot, movies)})
+
+        elif path in ("/api/admin/push/list", "/api/admin/multi/overview"):
+            try:
+                self.send_json(200, {"ok": True, **admin_push_dashboard()})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+
+        elif path == "/api/sync/pull":
+            qs = parse_query_string(self.path)
+            body = {
+                "userName": qs.get("userName") or qs.get("user") or "",
+                "includeLiveRecommend": qs.get("includeLive") in ("1", "true", "yes"),
+                "limit": qs.get("limit") or 20,
+            }
+            code, payload = handle_sync_pull(body)
+            self.send_json(code, payload)
+            return
+
+        elif path == "/api/push/feed":
+            qs = parse_query_string(self.path)
+            user_name = (qs.get("userName") or qs.get("user") or "").strip()
+            if not user_name:
+                self.send_json(400, {"ok": False, "error": "缺少 userName"})
+                return
+            feed = push_feed_get(user_name)
+            if not feed or not feed.get("cards"):
+                self.send_json(200, {
+                    "ok": True,
+                    "userName": user_name,
+                    "hasFeed": False,
+                    "cards": [],
+                    "message": "尚無已發布的推送，請聯繫展覽人員",
+                })
+                return
+            self.send_json(200, {"ok": True, "hasFeed": True, **feed})
 
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
 
         elif path == "/admin":
-            if os.path.exists("admin.html"):
-                with open("admin.html", "r", encoding="utf-8") as f:
+            admin_file = "admin_push.html" if os.path.exists("admin_push.html") else "admin.html"
+            if os.path.exists(admin_file):
+                with open(admin_file, "r", encoding="utf-8") as f:
                     self.send_html(f.read())
             else:
-                self.send_json(404, {"ok": False, "error": "admin.html not found"})
+                self.send_json(404, {"ok": False, "error": "admin_push.html not found"})
         elif path == "/config/keys":
             keys = get_gemini_keys()
             masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
@@ -1054,21 +1533,42 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         body = self.read_body()
 
+        # ========== 多人同步：APP 上傳喜好 ==========
+        if path == "/api/sync/push":
+            code, payload = handle_sync_push(body)
+            self.send_json(code, payload)
+            return
+
+        if path == "/api/sync/pull":
+            code, payload = handle_sync_pull(body)
+            self.send_json(code, payload)
+            return
+
+        # ========== 後台：同步過期推薦 ==========
+        if path == "/api/admin/multi/republish_stale":
+            limit = int(body.get("limit") or 20)
+            message = (body.get("message") or "").strip()
+            try:
+                self.send_json(200, admin_republish_stale_users(limit=limit, message=message))
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
         # ========== APP 喜歡 ==========
         if path == "/api/user/like":
-            userName = body.get("userName", "")
-            movieId = body.get("movieId", "")
+            userName = (body.get("userName") or "").strip()
+            movieId = (body.get("movieId") or "").strip()
             if not userName or not movieId:
-                self.send_json(400, {"ok": False})
+                self.send_json(400, {"ok": False, "error": "缺少 userName 或 movieId"})
                 return
-            if userName not in user_behavior:
-                user_behavior[userName] = {"like": [], "dislike": []}
-            u = user_behavior[userName]
+            u = get_user_prefs(userName)
             if movieId not in u["like"]:
                 u["like"].append(movieId)
             if movieId in u["dislike"]:
                 u["dislike"].remove(movieId)
-            self.send_json(200, {"ok": True})
+            persist_user_prefs(userName)
+            user_events_append(userName, [{"type": "like", "movieId": movieId}], body.get("deviceId", ""))
+            self.send_json(200, {"ok": True, "user": u})
             return
 
         # ========== APP 取得使用者 ==========
@@ -1077,89 +1577,108 @@ class Handler(BaseHTTPRequestHandler):
             if not user_name:
                 self.send_json(400, {"ok": False, "error": "缺少 userName"})
                 return
-            u = user_behavior.get(user_name) or {"like": [], "dislike": []}
-            user_behavior[user_name] = u
-            self.send_json(200, {"ok": True, "user": u})
+            u = get_user_prefs(user_name)
+            movies = db_read()
+            profile = summarize_profile(
+                {m["id"]: m for m in movies if m.get("id")},
+                u,
+            )
+            self.send_json(200, {"ok": True, "user": u, "profile": profile})
             return
 
         # ========== APP 不喜歡 ==========
         if path == "/api/user/dislike":
-            userName = body.get("userName", "")
-            movieId = body.get("movieId", "")
+            userName = (body.get("userName") or "").strip()
+            movieId = (body.get("movieId") or "").strip()
             if not userName or not movieId:
-                self.send_json(400, {"ok": False})
+                self.send_json(400, {"ok": False, "error": "缺少 userName 或 movieId"})
                 return
-            if userName not in user_behavior:
-                user_behavior[userName] = {"like": [], "dislike": []}
-            u = user_behavior[userName]
+            u = get_user_prefs(userName)
             if movieId not in u["dislike"]:
                 u["dislike"].append(movieId)
             if movieId in u["like"]:
                 u["like"].remove(movieId)
-            self.send_json(200, {"ok": True})
+            persist_user_prefs(userName)
+            user_events_append(userName, [{"type": "dislike", "movieId": movieId}], body.get("deviceId", ""))
+            self.send_json(200, {"ok": True, "user": u})
+            return
+
+        # ========== 喜好分析（後台／展覽用） ==========
+        if path == "/api/user/analyze":
+            user_name = (body.get("userName") or "").strip()
+            limit = int(body.get("limit") or 20)
+            if not user_name:
+                self.send_json(400, {"ok": False, "error": "缺少 userName"})
+                return
+            u = get_user_prefs(user_name)
+            movies = db_read()
+            cards, meta = build_recommend_cards(movies, u, limit=limit)
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "userName": user_name,
+                    "user": u,
+                    "profile": meta.get("profile") or summarize_profile(
+                        {m["id"]: m for m in movies if m.get("id")}, u
+                    ),
+                    "coldStart": meta.get("coldStart", False),
+                    "recommendations": cards,
+                },
+            )
+            return
+
+        # ========== 後台：預覽推送（不寫入 Sheets） ==========
+        if path == "/api/admin/push/preview":
+            user_name = (body.get("userName") or "").strip()
+            limit = int(body.get("limit") or 20)
+            message = (body.get("message") or "").strip()
+            if not user_name:
+                self.send_json(400, {"ok": False, "error": "缺少 userName"})
+                return
+            try:
+                doc = admin_build_push_payload(user_name, limit=limit, message=message)
+                self.send_json(200, {"ok": True, "preview": True, **doc})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        # ========== 後台：發布推送到 APP ==========
+        if path == "/api/admin/push/publish":
+            user_name = (body.get("userName") or "").strip()
+            limit = int(body.get("limit") or 20)
+            message = (body.get("message") or "").strip()
+            if not user_name:
+                self.send_json(400, {"ok": False, "error": "缺少 userName"})
+                return
+            try:
+                doc = admin_publish_push(user_name, limit=limit, message=message)
+                self.send_json(200, {"ok": True, "published": True, **doc})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/api/admin/push/publish_all":
+            limit = int(body.get("limit") or 20)
+            message = (body.get("message") or "").strip()
+            try:
+                result = admin_publish_push_all(limit=limit, message=message)
+                self.send_json(200, result)
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
             return
 
         # ========== APP 個人化推薦 ==========
         if path == "/api/sheets_card/recommend":
-            userName = body.get("userName", "")
-            limit = int(body.get("limit", 20))
-            if not userName or userName not in user_behavior:
-                allCards = []
-                movies = db_read()
-                for m in movies:
-                    allCards.append({
-                        "id": m.get("id", ""),
-                        "title": m.get("title", ""),
-                        "poster": m.get("poster") or m.get("thumb", ""),
-                        "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
-                        "genres": m.get("genres", []),
-                        "moods": m.get("moods", []),
-                        "actors": m.get("cast", ""),
-                        "url": m.get("url", ""),
-                        "ytId": m.get("ytId", "")
-                    })
-                self.send_json(200, allCards[:limit])
-                return
-
-            u = user_behavior[userName]
+            userName = (body.get("userName") or "").strip()
+            limit = int(body.get("limit") or 20)
             movies = db_read()
-
-            def getScore(m):
-                score = 0
-                if m["id"] in u["like"]:
-                    score += 50
-                if m["id"] in u["dislike"]:
-                    score -= 100
-                for g in m.get("genres", []):
-                    if any(gg in u["like"] for gg in g):
-                        score += 3
-                for s in m.get("scenes", []):
-                    if any(ss in u["like"] for ss in s):
-                        score += 2
-                return score
-
-            listCards = []
-            for m in movies:
-                card = {
-                    "id": m.get("id", ""),
-                    "title": m.get("title", ""),
-                    "poster": m.get("poster") or m.get("thumb", ""),
-                    "scenes": (m.get("scenesMain") or []) + (m.get("scenesSub") or []),
-                    "genres": m.get("genres", []),
-                    "moods": m.get("moods", []),
-                    "actors": m.get("cast", ""),
-                    "url": m.get("url", ""),
-                    "ytId": m.get("ytId", ""),
-                    "score": getScore(m)
-                }
-                if card["score"] > -50:
-                    listCards.append(card)
-
-            listCards.sort(key=lambda x: x["score"], reverse=True)
-            res = listCards[:limit]
-            for r in res:
-                r.pop("score", None)
-            self.send_json(200, res)
+            u = get_user_prefs(userName) if userName else {"like": [], "dislike": []}
+            cards, _meta = build_recommend_cards(movies, u, limit=limit)
+            for c in cards:
+                c.pop("score", None)
+                c.pop("matchReasons", None)
+            self.send_json(200, cards)
             return
 
         # 原本舊的 POST 路由
@@ -1526,6 +2045,8 @@ def main():
     print(f"MODEL : {MODEL}")
     print("=" * 52)
     ensure_sheet()
+    load_user_behavior_from_sheets()
+    load_push_feed_from_sheets()
     server = ThreadedServer(("0.0.0.0", PORT), Handler)
     print(f"Server running on 0.0.0.0:{PORT}")
     server.serve_forever()

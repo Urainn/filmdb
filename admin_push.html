@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FilmDB 後台分析推送</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #111; color: #eee; margin: 0; padding: 24px; }
+    h1 { font-size: 20px; }
+    a { color: #d4f27a; }
+    code { background: #222; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; margin: 12px 0; max-width: 720px; }
+    button { background: #d4f27a; color: #1a2600; border: none; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; margin-right: 8px; }
+    input { padding: 8px; border-radius: 6px; border: 1px solid #444; background: #222; color: #fff; width: 100%; max-width: 320px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; max-width: 900px; }
+    th, td { border-bottom: 1px solid #333; padding: 8px; text-align: left; }
+    #log { font-family: monospace; font-size: 12px; color: #aaa; }
+  </style>
+</head>
+<body>
+  <h1>FilmDB 後台分析推送</h1>
+  <p>完整操作請使用 <a href="/">主控台</a> → 左側「後台分析推送」。本頁提供 API 快速測試。</p>
+
+  <div class="card">
+    <label>使用者名稱 <input id="user" placeholder="小明"></label><br><br>
+    <label>則數 <input id="limit" type="number" value="20" style="width:80px"></label><br><br>
+    <button onclick="preview()">預覽分析</button>
+    <button onclick="publish()">發布推送</button>
+    <button onclick="feed()">讀取 APP Feed</button>
+  </div>
+
+  <pre id="log">就緒</pre>
+
+  <script>
+    const API = "";
+    async function post(path, body) {
+      const r = await fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      return r.json();
+    }
+    function log(x) { document.getElementById("log").textContent = JSON.stringify(x, null, 2); }
+    function u() { return document.getElementById("user").value.trim(); }
+    function lim() { return parseInt(document.getElementById("limit").value, 10) || 20; }
+    async function preview() { log(await post("/api/admin/push/preview", { userName: u(), limit: lim() })); }
+    async function publish() { log(await post("/api/admin/push/publish", { userName: u(), limit: lim() })); }
+    async function feed() {
+      const r = await fetch(API + "/api/push/feed?userName=" + encodeURIComponent(u()));
+      log(await r.json());
+    }
+  </script>
+</body>
+</html>
