@@ -1,8 +1,10 @@
+# Render 執行 python server.py 只需要這個（Google Sheets JWT 簽章）
 cryptography
-httpx
-flask
-pandas
-scikit-learn
-google-api-python-client
-google-auth-httplib2
 
+# 以下為舊版 app.py / recommend.py 本機用，線上部署不必安裝：
+# flask
+# pandas
+# scikit-learn
+# httpx
+# google-api-python-client
+# google-auth-httplib2

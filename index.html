@@ -228,12 +228,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <button class="btn btn-accent" onclick="go('add',null)">＋ 新增電影</button>
       </div>
     </div>
-    <div class="btn-row" id="reanalyze-bar" style="margin-bottom:12px;align-items:center">
+    <div class="btn-row" id="reanalyze-bar" style="margin-bottom:12px;align-items:center;flex-wrap:wrap">
       <span id="reanalyze-selected-count" style="font-size:12px;color:var(--text2);font-family:'DM Mono',monospace">已選 0 部</span>
       <button class="btn btn-sm" onclick="reanalyzeSelectVisible()">全選目前列表</button>
       <button class="btn btn-sm" onclick="reanalyzeSelectNone()">取消全選</button>
       <button class="btn btn-accent" id="btn-reanalyze-selected" onclick="reanalyzeSelected()" disabled>重新分析已選</button>
+      <button class="btn btn-sm" onclick="batchSyncAllYears()">📅 一鍵同步全庫年份</button>
     </div>
+    <div id="batch-sync-year-log" style="display:none;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:720px;max-height:160px;overflow:auto"></div>
     <div id="reanalyze-progress" style="display:none;margin-bottom:16px;max-width:720px">
       <div class="sbox show loading" id="reanalyze-status">
         <span class="spin"></span><span id="reanalyze-msg">準備重新分析...</span>
@@ -244,12 +246,13 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="font-size:10px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace" id="reanalyze-detail"></div>
     </div>
     <div class="search-row">
-      <input class="search-inp" id="list-q" type="text" placeholder="搜尋電影名稱、場景、類型..." oninput="renderList()">
+      <input class="search-inp" id="list-q" type="text" placeholder="搜尋片名、年份、場景、類型..." oninput="renderList()">
     </div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
           <th style="width:34px">選</th><th style="width:66px">縮圖</th><th>電影名稱</th>
+          <th style="width:52px">年份</th>
           <th>主要場景</th><th>次要場景</th><th>類型／情感</th><th>演員名單</th><th style="width:150px">操作</th>
         </tr></thead>
         <tbody id="list-body"></tbody>
@@ -295,6 +298,11 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <div class="step-head"><div class="step-n">3</div><div class="step-title">確認並儲存標籤</div></div>
         <div class="step-desc">Gemini 從影片直接產生的標籤，可以直接修改</div>
         <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="f-title" type="text"></div>
+        <div class="field">
+          <label class="fl">上映年份</label>
+          <input class="fi" id="f-year" type="text" inputmode="numeric" maxlength="4" placeholder="例如 2024">
+          <div class="fhint">可手動修改；貼 YouTube 網址時會嘗試從影片資訊帶入</div>
+        </div>
         <div class="field"><label class="fl">簡介</label><textarea class="fta" id="f-desc" rows="2"></textarea></div>
         <div class="field">
           <label class="fl">主要場景</label>
@@ -453,10 +461,12 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
     </div>
 
-    <div class="btn-row" style="margin-top:15px">
+    <div class="btn-row" style="margin-top:15px;flex-wrap:wrap">
       <button class="btn btn-danger" onclick="batchSyncAllActors()">🚀 一鍵批次同步全庫所有電影演員</button>
+      <button class="btn" onclick="batchSyncAllYears()">📅 一鍵同步全庫上映年份</button>
     </div>
     <div id="batch-sync-actor-log" style="margin-top:10px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:560px;"></div>
+    <div id="batch-sync-year-log-settings" style="margin-top:10px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:560px;max-height:200px;overflow:auto"></div>
 
     <div style="max-width:560px">
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
@@ -504,6 +514,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
   <div class="mo-box">
     <div class="mo-head"><span>編輯電影</span><button class="mo-x" onclick="closeEdit()">✕</button></div>
     <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="e-title" type="text"></div>
+    <div class="field">
+      <label class="fl">上映年份</label>
+      <input class="fi" id="e-year" type="text" inputmode="numeric" maxlength="4" placeholder="例如 2024">
+    </div>
     <div class="field"><label class="fl">YouTube 網址</label><input class="fi" id="e-url" type="text"></div>
     <div class="field"><label class="fl">簡介</label><textarea class="fta" id="e-desc" rows="2"></textarea></div>
     <div class="field"><label class="fl">主要場景</label><input class="fi" id="e-scenes-main" type="text"></div>
@@ -541,6 +555,32 @@ let editId = null;
 let pendingImport = null;
 let curYtId = '';
 let curVideoTitle = '';
+let curVideoYear = '';
+
+function yearFromDate(d) {
+  const m = String(d || '').match(/^(\d{4})/);
+  return m ? m[1] : '';
+}
+
+function movieYear(m) {
+  if (!m) return '';
+  const y = String(m.year || '').trim();
+  if (/^\d{4}$/.test(y)) return y;
+  return yearFromDate(m.publishedAt);
+}
+
+function readYearInput(id) {
+  const raw = document.getElementById(id)?.value.trim() || '';
+  if (!raw) return '';
+  if (!/^\d{4}$/.test(raw)) return null;
+  return raw;
+}
+
+function resolveSaveYear(existing, item, analyzeData) {
+  const py = String(analyzeData?.year || '').trim();
+  if (/^\d{4}$/.test(py)) return py;
+  return movieYear(existing) || item?.year || yearFromDate(item?.publishedAt) || '';
+}
 let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
 let reanalyzeRunning = false;
@@ -574,7 +614,7 @@ async function loadDb() {
     if (r.ok) {
       db = r.data;
       updateStats();
-      renderList();
+      renderList().catch(e => console.error('renderList', e));
       setServerStatus(true);
     } else {
       setServerStatus(false);
@@ -629,32 +669,164 @@ function go(name, el) {
   if (name === 'settings') loadKeyStatus();
 }
 
-// ✅ 修復：自動抓取電影海報 / YouTube 縮圖
-async function getMoviePoster(card) {
-  const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
-  const YT_IMG = "https://img.youtube.com/vi/";
+const PLACEHOLDER_POSTER = "data:image/svg+xml," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="500" height="280"><rect fill="#1a1a1a" width="100%" height="100%"/><text x="50%" y="50%" fill="#888" font-size="18" text-anchor="middle" dominant-baseline="middle">無海報</text></svg>'
+);
+const tmdbPosterCache = new Map();
+const tmdbYearCache = new Map();
 
-  // 1. 優先使用 TMDB 海報
-  if (card.poster && card.poster.trim()) {
-    if (card.poster.startsWith("/")) {
-      return TMDB_IMG + card.poster;
-    }
-    return card.poster;
+function isYoutubeVideoId(id) {
+  if (!id) return false;
+  const s = String(id);
+  if (s.startsWith('tmdb-')) return false;
+  return /^[A-Za-z0-9_-]{11}$/.test(s);
+}
+
+function parseTmdbFromYtId(ytId) {
+  const m = String(ytId || '').match(/^tmdb-(movie|tv)-(\d+)$/);
+  return m ? { mediaType: m[1], tmdbId: m[2] } : null;
+}
+
+function normalizePosterUrl(url) {
+  if (!url || !String(url).trim()) return '';
+  const p = String(url).trim();
+  if (/img\.youtube\.com\/vi\/tmdb-/i.test(p)) return '';
+  if (p.startsWith('http')) return p;
+  if (p.startsWith('/')) return 'https://image.tmdb.org/t/p/w500' + p;
+  return p;
+}
+
+async function fetchTmdbPosterUrl(tmdbId, mediaType = 'movie') {
+  const key = `${mediaType}-${tmdbId}`;
+  if (tmdbPosterCache.has(key)) return tmdbPosterCache.get(key);
+  if (!TMDB_API_KEY || !tmdbId) return '';
+  try {
+    const r = await fetch(
+      `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?api_key=${TMDB_API_KEY}&language=zh-TW`
+    );
+    const d = await r.json();
+    const url = d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : '';
+    tmdbPosterCache.set(key, url);
+    return url;
+  } catch (e) {
+    tmdbPosterCache.set(key, '');
+    return '';
+  }
+}
+
+async function searchTmdbPosterByTitle(title, mediaType = 'movie') {
+  const q = (title || '').trim();
+  if (!q || !TMDB_API_KEY) return '';
+  const cacheKey = `q:${mediaType}:${q}`;
+  if (tmdbPosterCache.has(cacheKey)) return tmdbPosterCache.get(cacheKey);
+  try {
+    const r = await fetch(
+      `https://api.themoviedb.org/3/search/${mediaType}?api_key=${TMDB_API_KEY}&language=zh-TW&query=${encodeURIComponent(q)}`
+    );
+    const d = await r.json();
+    const hit = (d.results || [])[0];
+    const url = hit?.poster_path ? `https://image.tmdb.org/t/p/w500${hit.poster_path}` : '';
+    tmdbPosterCache.set(cacheKey, url);
+    if (hit?.id) tmdbPosterCache.set(`${mediaType}-${hit.id}`, url);
+    return url;
+  } catch (e) {
+    tmdbPosterCache.set(cacheKey, '');
+    return '';
+  }
+}
+
+function isTmdbImageUrl(url) {
+  return !!url && String(url).includes('image.tmdb.org');
+}
+
+/** 優先 TMDB：已存海報 → TMDB ID → 片名搜尋 */
+async function resolveTmdbPoster(card) {
+  for (const field of [card.poster, card.thumb]) {
+    const u = normalizePosterUrl(field);
+    if (u && isTmdbImageUrl(u)) return u;
   }
 
-  // 2. 沒有海報 → 用 YouTube 縮圖
-  if (card.ytId && card.ytId.trim()) {
+  const parsed = parseTmdbFromYtId(card.ytId);
+  const tmdbId = card.tmdbId || (parsed && parsed.tmdbId);
+  const mediaType = card.mediaType || (parsed && parsed.mediaType) || 'movie';
+  if (tmdbId) {
+    const byId = await fetchTmdbPosterUrl(tmdbId, mediaType);
+    if (byId) return byId;
+  }
+
+  const title = cleanMovieTitle(card.title || '') || (card.title || '').trim();
+  if (title) {
+    const byTitle = await searchTmdbPosterByTitle(title, mediaType);
+    if (byTitle) return byTitle;
+    if (mediaType === 'movie') {
+      const byTitleTv = await searchTmdbPosterByTitle(title, 'tv');
+      if (byTitleTv) return byTitleTv;
+    }
+  }
+
+  for (const field of [card.poster, card.thumb]) {
+    const u = normalizePosterUrl(field);
+    if (u && !/img\.youtube\.com/i.test(u)) return u;
+  }
+
+  return '';
+}
+
+// 同步快速縮圖（列表立即顯示，不打 TMDB API）
+function getMoviePosterFast(card) {
+  const YT_IMG = "https://img.youtube.com/vi/";
+  for (const field of [card.poster, card.thumb]) {
+    const u = normalizePosterUrl(field);
+    if (u && isTmdbImageUrl(u)) return u;
+  }
+  if (isYoutubeVideoId(card.ytId)) {
     return YT_IMG + card.ytId + "/hqdefault.jpg";
   }
+  for (const field of [card.poster, card.thumb]) {
+    const u = normalizePosterUrl(field);
+    if (u && !/img\.youtube\.com\/vi\/tmdb-/i.test(u)) return u;
+  }
+  return PLACEHOLDER_POSTER;
+}
 
-  // 3. 都沒有 → 預設圖
-  return "https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=無海報";
+// 完整解析：TMDB API（片名搜尋）→ YouTube，用於單張或搜尋結果
+async function getMoviePoster(card) {
+  const YT_IMG = "https://img.youtube.com/vi/";
+  const tmdbUrl = await resolveTmdbPoster(card);
+  if (tmdbUrl) return tmdbUrl;
+  if (isYoutubeVideoId(card.ytId)) {
+    return YT_IMG + card.ytId + "/hqdefault.jpg";
+  }
+  const ytStored = normalizePosterUrl(card.thumb) || normalizePosterUrl(card.poster);
+  if (ytStored && /img\.youtube\.com/i.test(ytStored)) return ytStored;
+  return PLACEHOLDER_POSTER;
+}
+
+let posterEnhanceGen = 0;
+
+async function lazyEnhanceListPosters(rows) {
+  const gen = ++posterEnhanceGen;
+  const queue = rows.filter(m => {
+    const fast = getMoviePosterFast(m);
+    return fast === PLACEHOLDER_POSTER || /img\.youtube\.com/i.test(fast);
+  });
+  const concurrency = 4;
+  async function worker() {
+    while (queue.length && gen === posterEnhanceGen) {
+      const m = queue.shift();
+      const url = await resolveTmdbPoster(m);
+      if (!url || gen !== posterEnhanceGen) continue;
+      const img = document.querySelector(`img[data-poster-id="${m.id}"]`);
+      if (img) img.src = url;
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
 }
 
 async function renderList() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   const rows = q ? db.filter(m =>
-    [m.title, m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
+    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
   ) : [...db];
 
   const body = document.getElementById('list-body');
@@ -664,7 +836,7 @@ async function renderList() {
 
   let html = '';
   for (const m of rows) {
-    const thumb = await getMoviePoster(m);
+    const thumb = getMoviePosterFast(m);
     
     html += `
       <tr>
@@ -674,18 +846,19 @@ async function renderList() {
             style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer">
         </td>
         <td>
-          <img class="thumb" src="${thumb}"
-            onclick="playVideo('${m.ytId}','${esc(m.title)}')"
+          <img class="thumb" data-poster-id="${m.id}" src="${thumb}"
+            onclick="playVideoById('${m.id}')"
             title="▶ 點擊播放預告片"
             style="cursor:pointer;transition:opacity 0.15s"
             onmouseover="this.style.opacity=0.75"
             onmouseout="this.style.opacity=1"
-            onerror="this.src='https://via.placeholder.com/500x750/1a1a1a/e8e6e1?text=Load+Fail'">
+            onerror="this.onerror=null;this.src=PLACEHOLDER_POSTER">
         </td>
         <td>
           <div class="td-title">${m.title}</div>
           <div style="font-size:10.5px;color:var(--text3);margin-top:1px">${m.desc ? m.desc.slice(0,40)+(m.desc.length>40?'…':'') : ''}</div>
         </td>
+        <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--text2);vertical-align:middle">${movieYear(m) || '—'}</td>
         <td><div class="chips">${(m.scenesMain||[]).map(t=>`<span class="chip sc">${t}</span>`).join('')}</div></td>
         <td><div class="chips">${(m.scenesSub||[]).map(t=>`<span class="chip sc" style="opacity:0.7">${t}</span>`).join('')}</div></td>
         <td><div class="chips">
@@ -702,6 +875,7 @@ async function renderList() {
   }
   body.innerHTML = html;
   updateReanalyzeBar();
+  lazyEnhanceListPosters(rows);
 }
 
 async function del(id, title) {
@@ -717,7 +891,7 @@ async function del(id, title) {
 function currentListRows() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   return q ? db.filter(m =>
-    [m.title, m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
+    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
   ) : [...db];
 }
 
@@ -761,7 +935,7 @@ async function reanalyzeSelected() {
 }
 
 function reanalyzeItemPayload(m) {
-  const url = (m.url || (m.ytId ? `https://www.youtube.com/watch?v=${m.ytId}` : '')).trim();
+  const url = ytItemUrl(m).trim();
   return {
     source: m.source || (m.tmdbId ? 'tmdb' : 'youtube'),
     mediaType: m.mediaType || 'movie',
@@ -773,7 +947,8 @@ function reanalyzeItemPayload(m) {
     poster: m.poster || m.thumb || '',
     thumb: m.thumb || m.poster || '',
     tmdbGenres: m.tmdbGenres || m.genres || [],
-    publishedAt: m.publishedAt || ''
+    publishedAt: m.publishedAt || '',
+    year: movieYear(m)
   };
 }
 
@@ -790,7 +965,14 @@ async function lookupYoutubeCleanTitle(item) {
 }
 
 async function runReanalyzeQueue(items) {
-  if (reanalyzeRunning) return;
+  if (reanalyzeRunning) {
+    toast('重析佇列執行中，請稍候…');
+    return;
+  }
+  if (!items || !items.length) {
+    toast('請先勾選要重析的電影');
+    return;
+  }
   reanalyzeRunning = true;
   updateReanalyzeBar();
 
@@ -807,6 +989,7 @@ async function runReanalyzeQueue(items) {
   let successCount = 0;
   const total = items.length;
 
+  try {
   for (const m of items) {
     const item = reanalyzeItemPayload(m);
     msgEl.textContent = `重新分析中 (${completed + 1}/${total})：${(m.title || '').slice(0, 28)}...`;
@@ -842,7 +1025,8 @@ async function runReanalyzeQueue(items) {
           scenesSub: ss,
           scenes: [...sm, ...ss],
           genres: p.genres || [],
-          moods: p.moods || []
+          moods: p.moods || [],
+          year: resolveSaveYear(m, item, p)
         };
         await apiFetch('/db', { method: 'POST', body: JSON.stringify(updated) });
         reanalyzeSelectedIds.delete(m.id);
@@ -862,21 +1046,29 @@ async function runReanalyzeQueue(items) {
   statusEl.className = 'sbox show ok';
   msgEl.textContent = `完成，成功重新分析 ${successCount}／${total} 部電影`;
   detailEl.textContent = '';
-  reanalyzeRunning = false;
-  updateReanalyzeBar();
-  await loadDb();
+  } catch (e) {
+    statusEl.className = 'sbox show err';
+    msgEl.textContent = '重析中斷';
+    detailEl.textContent = e.message || String(e);
+    toast('重析失敗：' + (e.message || e));
+  } finally {
+    reanalyzeRunning = false;
+    updateReanalyzeBar();
+    await loadDb();
+  }
 }
 
 function resetAdd() {
   curYtId = '';
   curVideoTitle = '';
+  curVideoYear = '';
   document.getElementById('f-url').value = '';
   document.getElementById('yt-tag').innerHTML = '';
   document.getElementById('btn-analyze').disabled = true;
   document.getElementById('s1').className = 'step s-active';
   document.getElementById('s2').style.display = 'none';
   document.getElementById('s3').style.display = 'none';
-  ['f-title','f-desc','f-scenes-main','f-scenes-sub','f-genres','f-moods','f-cast'].forEach(id => {
+  ['f-title','f-year','f-desc','f-scenes-main','f-scenes-sub','f-genres','f-moods','f-cast'].forEach(id => {
     document.getElementById(id).value = '';
   });
 }
@@ -886,6 +1078,7 @@ async function onUrl() {
   const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
   curYtId = m ? m[1] : '';
   curVideoTitle = '';
+  curVideoYear = '';
   document.getElementById('yt-tag').innerHTML = curYtId ? `<div class="yt-tag">▶ ID: ${curYtId}</div>` : '';
   document.getElementById('btn-analyze').disabled = !curYtId;
   if (!curYtId) return;
@@ -897,7 +1090,11 @@ async function onUrl() {
     });
     if (info.ok) {
       curVideoTitle = info.cleanTitle || cleanMovieTitle(info.title) || info.title || '';
-      document.getElementById('yt-tag').innerHTML = `<div class="yt-tag">▶ ID: ${curYtId}${curVideoTitle ? ` · ${curVideoTitle}` : ''}</div>`;
+      curVideoYear = yearFromDate(info.publishedAt);
+      const yearEl = document.getElementById('f-year');
+      if (yearEl && curVideoYear) yearEl.value = curVideoYear;
+      const yearHint = curVideoYear ? ` · ${curVideoYear}` : '';
+      document.getElementById('yt-tag').innerHTML = `<div class="yt-tag">▶ ID: ${curYtId}${curVideoTitle ? ` · ${curVideoTitle}` : ''}${yearHint}</div>`;
     }
   } catch(e) {}
 }
@@ -1017,6 +1214,9 @@ async function analyze() {
   if (duplicate) p._overwriteId = duplicate.id;
 
   document.getElementById('f-title').value = curVideoTitle || p.title || '';
+  const py = String(p.year || '').trim();
+  const analyzedYear = /^\d{4}$/.test(py) ? py : yearFromDate(py);
+  document.getElementById('f-year').value = analyzedYear || curVideoYear || document.getElementById('f-year').value || '';
   document.getElementById('f-desc').value = p.desc || '';
   document.getElementById('f-scenes-main').value = join(p.scenes_main);
   document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
@@ -1042,6 +1242,8 @@ async function saveEntry() {
   const title = document.getElementById('f-title').value.trim();
   if (!title) { toast('請填寫電影名稱', 'err'); return; }
   if (!curYtId) { toast('YouTube ID 遺失', 'err'); return; }
+  const year = readYearInput('f-year');
+  if (year === null) { toast('上映年份請填四位數字，或留空', 'err'); return; }
 
   const sm = split(document.getElementById('f-scenes-main').value);
   const ss = split(document.getElementById('f-scenes-sub').value);
@@ -1051,6 +1253,8 @@ async function saveEntry() {
     ytId: curYtId,
     url: document.getElementById('f-url').value.trim(),
     title,
+    year,
+    publishedAt: year ? `${year}-01-01` : '',
     desc: document.getElementById('f-desc').value.trim(),
     scenesMain: sm, scenesSub: ss, scenes: [...sm, ...ss],
     genres: split(document.getElementById('f-genres').value),
@@ -1071,6 +1275,7 @@ function openEdit(id) {
   const m = db.find(x=>x.id===id); if (!m) return;
   editId = id;
   document.getElementById('e-title').value = m.title;
+  document.getElementById('e-year').value = movieYear(m);
   document.getElementById('e-url').value = m.url || ('https://www.youtube.com/watch?v=' + m.ytId);
   document.getElementById('e-desc').value = m.desc || '';
   document.getElementById('e-scenes-main').value = join(m.scenesMain||[]);
@@ -1085,6 +1290,8 @@ function closeEdit() { document.getElementById('edit-mo').classList.remove('open
 async function saveEdit() {
   if (!editId) return;
   const m = db.find(x=>x.id===editId); if (!m) return;
+  const year = readYearInput('e-year');
+  if (year === null) { toast('上映年份請填四位數字，或留空', 'err'); return; }
   const eUrl = document.getElementById('e-url').value.trim();
   const eYtMatch = eUrl.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
   const sm = split(document.getElementById('e-scenes-main').value);
@@ -1092,6 +1299,8 @@ async function saveEdit() {
   const updated = {
     ...m,
     title: document.getElementById('e-title').value.trim(),
+    year,
+    publishedAt: year ? `${year}-01-01` : (m.publishedAt || ''),
     url: eUrl,
     ytId: eYtMatch ? eYtMatch[1] : m.ytId,
     desc: document.getElementById('e-desc').value.trim(),
@@ -1143,6 +1352,178 @@ async function syncActorsFromTMDB() {
 }
 
 let batchSyncRunning = false;
+let batchYearSyncRunning = false;
+
+async function fetchTmdbYearById(tmdbId, mediaType = 'movie') {
+  const cacheKey = `y:${mediaType}-${tmdbId}`;
+  if (tmdbYearCache.has(cacheKey)) return tmdbYearCache.get(cacheKey);
+  if (!TMDB_API_KEY || !tmdbId) return '';
+  try {
+    const r = await fetch(
+      `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?api_key=${TMDB_API_KEY}&language=zh-TW`
+    );
+    const d = await r.json();
+    const y = yearFromDate(d.release_date || d.first_air_date || '');
+    tmdbYearCache.set(cacheKey, y);
+    return y;
+  } catch (e) {
+    tmdbYearCache.set(cacheKey, '');
+    return '';
+  }
+}
+
+async function searchTmdbYearByTitle(title, mediaType = 'movie') {
+  const q = (title || '').trim();
+  if (!q || !TMDB_API_KEY) return '';
+  const cacheKey = `yq:${mediaType}:${q}`;
+  if (tmdbYearCache.has(cacheKey)) return tmdbYearCache.get(cacheKey);
+  try {
+    const r = await fetch(
+      `https://api.themoviedb.org/3/search/${mediaType}?api_key=${TMDB_API_KEY}&language=zh-TW&query=${encodeURIComponent(q)}`
+    );
+    const d = await r.json();
+    const hit = (d.results || [])[0];
+    const y = yearFromDate(hit?.release_date || hit?.first_air_date || '');
+    tmdbYearCache.set(cacheKey, y);
+    if (hit?.id) tmdbYearCache.set(`y:${mediaType}-${hit.id}`, y);
+    return y;
+  } catch (e) {
+    tmdbYearCache.set(cacheKey, '');
+    return '';
+  }
+}
+
+async function lookupReleaseYear(item) {
+  const parsed = parseTmdbFromYtId(item.ytId);
+  const mediaType = item.mediaType || (parsed && parsed.mediaType) || 'movie';
+  const tmdbId = item.tmdbId || (parsed && parsed.tmdbId);
+
+  if (tmdbId) {
+    const y = await fetchTmdbYearById(tmdbId, mediaType);
+    if (y) return { year: y, source: 'TMDB ID' };
+  }
+
+  const title = cleanMovieTitle(item.title || '') || (item.title || '').trim();
+  if (title) {
+    let y = await searchTmdbYearByTitle(title, mediaType);
+    if (y) return { year: y, source: 'TMDB 搜尋' };
+    if (mediaType === 'movie') {
+      y = await searchTmdbYearByTitle(title, 'tv');
+      if (y) return { year: y, source: 'TMDB 影集' };
+    }
+  }
+
+  const fromPub = yearFromDate(item.publishedAt);
+  if (fromPub) return { year: fromPub, source: '既有日期' };
+
+  if (isYoutubeVideoId(item.ytId)) {
+    try {
+      const info = await apiFetch('/youtube/info', {
+        method: 'POST',
+        body: JSON.stringify({ ytId: item.ytId, url: item.url || '' })
+      });
+      if (info.ok) {
+        const y = info.year || yearFromDate(info.publishedAt);
+        if (y) return { year: y, source: 'YouTube（上傳年）' };
+      }
+    } catch (e) {}
+  }
+
+  return { year: '', source: '' };
+}
+
+async function batchSyncAllYears() {
+  if (batchYearSyncRunning) return toast('年份同步執行中，請稍候', 'err');
+  if (!db.length) return toast('資料庫是空的', 'err');
+  if (!TMDB_API_KEY) return toast('請先設定 TMDB_API_KEY', 'err');
+
+  if (!confirm(`即將為全庫 ${db.length} 部電影同步「上映年份」。\n\n優先：TMDB 上映年 → 資料內日期 → YouTube（備援）\n\n確定開始？`)) return;
+  const modeFillEmpty = !confirm(
+    `第二個選項：\n\n按「確定」= 全部重新查詢（已有年份也會依 TMDB 更新）\n按「取消」= 僅補齊目前沒有年份的電影`
+  );
+
+  batchYearSyncRunning = true;
+  const logBoxes = [
+    document.getElementById('batch-sync-year-log'),
+    document.getElementById('batch-sync-year-log-settings')
+  ].filter(Boolean);
+  logBoxes.forEach(el => {
+    el.style.display = 'block';
+    el.innerHTML = `<div class="sbox show loading"><span class="spin"></span>開始同步上映年份（${modeFillEmpty ? '僅補空白' : '全部更新'}）...</div>`;
+  });
+
+  let successNum = 0;
+  let skipNum = 0;
+  let failNum = 0;
+  const total = db.length;
+
+  const appendLog = (html) => {
+    logBoxes.forEach(el => { el.innerHTML += html; el.scrollTop = el.scrollHeight; });
+  };
+
+  for (let i = 0; i < db.length; i++) {
+    const item = db[i];
+    const nowIdx = i + 1;
+    const current = movieYear(item);
+
+    if (modeFillEmpty && current) {
+      skipNum++;
+      appendLog(`<div>【${nowIdx}/${total}】略過（已有 ${current}）：${item.title}</div>`);
+      continue;
+    }
+
+    appendLog(`<div>【${nowIdx}/${total}】查詢中：${item.title || '(無片名)'}</div>`);
+
+    if (!item.title && !item.tmdbId && !isYoutubeVideoId(item.ytId)) {
+      skipNum++;
+      appendLog(`<div style="color:var(--amber)">⚠ 無法查詢，已跳過</div>`);
+      continue;
+    }
+
+    try {
+      const { year, source } = await lookupReleaseYear(item);
+      if (!year) {
+        failNum++;
+        appendLog(`<div style="color:var(--red)">❌ 找不到年份：${item.title}</div>`);
+        continue;
+      }
+      if (modeFillEmpty && current === year) {
+        skipNum++;
+        appendLog(`<div style="color:var(--text3)">－ 年份相同（${year}），略過</div>`);
+        continue;
+      }
+      if (!modeFillEmpty && current === year) {
+        skipNum++;
+        appendLog(`<div style="color:var(--text3)">－ 已是 ${year}（${source}），略過</div>`);
+        continue;
+      }
+
+      item.year = year;
+      if (!item.publishedAt || item.publishedAt.startsWith(current + '-') || !current) {
+        item.publishedAt = `${year}-01-01`;
+      }
+      const saveRes = await apiFetch('/db', { method: 'POST', body: JSON.stringify(item) });
+      if (!saveRes.ok) throw new Error(saveRes.error || '儲存失敗');
+      successNum++;
+      appendLog(`<div style="color:var(--accent)">✅ ${item.title} → ${year}（${source}）</div>`);
+    } catch (e) {
+      failNum++;
+      appendLog(`<div style="color:var(--red)">❌ ${item.title}：${e.message || e}</div>`);
+    }
+
+    await sleep(350);
+  }
+
+  const summary = `<div class="sbox show ok" style="margin-top:12px;">
+    ✅ 年份同步完成<br>
+    更新：${successNum} 部 · 略過：${skipNum} 部 · 失敗：${failNum} 部
+  </div>`;
+  logBoxes.forEach(el => { el.innerHTML += summary; });
+  batchYearSyncRunning = false;
+  toast(`年份同步完成：更新 ${successNum} 部`, successNum ? 'ok' : '');
+  await loadDb();
+}
+
 async function batchSyncAllActors() {
   if(batchSyncRunning) return toast("正在執行中，請稍後","err");
   if(!TMDB_API_KEY) return toast("請先填寫 TMDB_API_KEY","err");
@@ -1215,10 +1596,61 @@ async function batchSyncAllActors() {
   await loadDb();
 }
 
-function playVideo(ytId, title) {
-  document.getElementById('vm-title').textContent = title;
-  document.getElementById('yt-frame').src = `https://www.youtube.com/embed/${ytId}?autoplay=1`;
+function extractYoutubeId(ytId, url) {
+  if (url) {
+    const m = String(url).match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+    if (m) return m[1];
+  }
+  if (isYoutubeVideoId(ytId)) return String(ytId).trim();
+  return '';
+}
+
+function openVideoModal(embedId, title) {
+  document.getElementById('vm-title').textContent = title || '';
+  document.getElementById('yt-frame').src = `https://www.youtube.com/embed/${embedId}?autoplay=1&rel=0`;
   document.getElementById('video-mo').classList.add('open');
+}
+
+function playVideo(ytId, title, url) {
+  const embedId = extractYoutubeId(ytId, url);
+  if (!embedId) {
+    toast('此片沒有可播放的 YouTube 預告片', 'err');
+    return;
+  }
+  openVideoModal(embedId, title);
+}
+
+async function playVideoById(id) {
+  const m = db.find(x => x.id === id);
+  if (!m) return;
+
+  let embedId = extractYoutubeId(m.ytId, m.url);
+
+  if (!embedId) {
+    const parsed = parseTmdbFromYtId(m.ytId);
+    const tmdbId = m.tmdbId || (parsed && parsed.tmdbId);
+    const mediaType = m.mediaType || (parsed && parsed.mediaType) || 'movie';
+    if (tmdbId && TMDB_API_KEY) {
+      try {
+        const r = await fetch(
+          `https://api.themoviedb.org/3/${mediaType}/${tmdbId}/videos?api_key=${TMDB_API_KEY}&language=zh-TW`
+        );
+        const d = await r.json();
+        const vid = (d.results || []).find(
+          v => v.site === 'YouTube' && /Trailer|Teaser/.test(v.type || '')
+        );
+        if (vid && vid.key) embedId = vid.key;
+      } catch (e) {
+        console.error('TMDB trailer', e);
+      }
+    }
+  }
+
+  if (!embedId) {
+    toast('此片沒有可播放的 YouTube 預告片', 'err');
+    return;
+  }
+  openVideoModal(embedId, m.title);
 }
 function closeVideo() {
   document.getElementById('video-mo').classList.remove('open');
@@ -1442,7 +1874,7 @@ async function ytSearch() {
   document.getElementById('btn-yt-search').disabled = false;
 }
 
-function renderYtResults() {
+async function renderYtResults() {
   const grid = document.getElementById('yt-results-grid');
   if (!ytResults.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:12px">沒有搜尋結果</div>'; return; }
 
@@ -1461,18 +1893,28 @@ function renderYtResults() {
     return;
   }
 
-  grid.innerHTML = filtered.map((v) => `
+  let html = '';
+  for (const v of filtered) {
+    const thumb = await getMoviePoster({
+      title: v.title,
+      ytId: v.ytId,
+      thumb: v.thumb,
+      poster: v.poster || '',
+      mediaType: v.mediaType || 'movie',
+      tmdbId: v.tmdbId || ''
+    });
+    html += `
     <div class="yt-card ${v.inDb ? 'in-db' : ''} ${ytSelected.has(v.ytId) ? 'selected' : ''}"
       onclick="ytToggle('${v.ytId}', ${v.inDb})" id="ytcard-${v.ytId}">
       <div class="yt-check">${ytSelected.has(v.ytId) ? '✓' : ''}</div>
-      <img class="yt-thumb" src="${v.thumb}" alt="${v.title}" onerror="this.style.background='#222'">
+      <img class="yt-thumb" src="${thumb}" alt="${v.title}" onerror="this.onerror=null;this.src=PLACEHOLDER_POSTER">
       <div class="yt-info">
         <div class="yt-title">${v.title}</div>
-        <div class="yt-meta">${v.channel} · ${v.publishedAt}</div>
+        <div class="yt-meta">${v.channel}${v.year || yearFromDate(v.publishedAt) ? ' · ' + (v.year || yearFromDate(v.publishedAt)) : ''}${v.publishedAt ? ' · ' + v.publishedAt : ''}</div>
       </div>
-    </div>
-  `).join('');
-
+    </div>`;
+  }
+  grid.innerHTML = html;
   updateYtBatchBar();
 }
 
@@ -1641,7 +2083,9 @@ async function tmdbAutoImport() {
               scenes: [...sm, ...ss],
               genres: p.genres || item.tmdbGenres || [],
               moods: p.moods || [],
-              actors: (p.cast || p.actors || []).join('、')
+              actors: (p.cast || p.actors || []).join('、'),
+              year: item.year || movieYear({ publishedAt: item.publishedAt }) || yearFromDate(item.publishedAt),
+              publishedAt: item.publishedAt || ''
             };
             const saveRes = await apiFetch('/db', { method: 'POST', body: JSON.stringify(entry) });
             if (!saveRes.ok) throw new Error(saveRes.error || '儲存失敗');
@@ -1693,14 +2137,37 @@ function sleep(ms) {
   return new Promise(res => setTimeout(res, ms));
 }
 
+function ytItemUrl(item) {
+  if (item.url && String(item.url).trim()) return item.url.trim();
+  if (isYoutubeVideoId(item.ytId)) {
+    return `https://www.youtube.com/watch?v=${item.ytId}`;
+  }
+  return '';
+}
+
+function formatAnalyzeError(err) {
+  const s = String(err || '');
+  if (s.includes('配額') || s.includes('quota') || s.includes('429'))
+    return 'Gemini API 配額用盡。請到 Google AI Studio 檢查配額，或在網站「API Key 設定」換新的 Key。';
+  if (s.includes('location is not supported') || s.includes('地區不可用') || s.includes('地區受限'))
+    return 'Gemini Key 地區受限。請在 Google AI Studio 建立新 Key，並在網站「API Key 設定」更新。';
+  if (s.includes('所有 Gemini Key'))
+    return s;
+  return s.length > 220 ? s.slice(0, 220) + '…' : s;
+}
+
 async function analyzeWithRetry(item, msgEl, detailEl, completed, total) {
   const maxAttempts = 5;
+  const url = ytItemUrl(item);
+  if (!url && item.source !== 'tmdb') {
+    return { ok: false, error: '缺少 YouTube 影片網址' };
+  }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const analyzeRes = await apiFetch(item.source === 'tmdb' ? '/tmdb/analyze' : '/analyze', {
         method: 'POST',
-        body: JSON.stringify(item.source === 'tmdb' ? { item } : { url: item.url })
+        body: JSON.stringify(item.source === 'tmdb' ? { item } : { url })
       });
 
       if (analyzeRes.ok) return analyzeRes;
@@ -1745,6 +2212,7 @@ async function ytBatchAnalyze() {
 
   let completed = 0;
   let successCount = 0;
+  let lastError = '';
   const total = selected.length;
 
   for (const item of selected) {
@@ -1773,13 +2241,22 @@ async function ytBatchAnalyze() {
           scenes: [...sm, ...ss],
           genres: p.genres || [],
           moods: p.moods || [],
-          actors: (p.cast || p.actors || []).join('、')
+          actors: (p.cast || p.actors || []).join('、'),
+          year: resolveSaveYear(null, item, p),
+          publishedAt: item.publishedAt || ''
         };
 
-        await apiFetch('/db', {
+        const dbRes = await apiFetch('/db', {
           method: 'POST',
           body: JSON.stringify(entry)
         });
+        if (!dbRes.ok) {
+          lastError = formatAnalyzeError(dbRes.error || '寫入資料庫失敗');
+          detailEl.textContent = `⚠ 「${item.title.slice(0,20)}」已分析但無法存入：${lastError}`;
+          completed++;
+          if (completed < total) await sleep(8000);
+          continue;
+        }
 
         const v = ytResults.find(v => v.ytId === item.ytId);
         if (v) v.inDb = true;
@@ -1792,10 +2269,12 @@ async function ytBatchAnalyze() {
         }
         successCount++;
       } else {
-        detailEl.textContent = `⚠ 「${item.title.slice(0,20)}」分析失敗：${analyzeRes.error || '未知錯誤'}，繼續下一部...`;
+        lastError = formatAnalyzeError(analyzeRes.error || '未知錯誤');
+        detailEl.textContent = `⚠ 「${item.title.slice(0,20)}」分析失敗：${lastError}`;
       }
     } catch (e) {
-      detailEl.textContent = `⚠ 連線錯誤：${e.message || e}，繼續下一部...`;
+      lastError = formatAnalyzeError(e.message || e);
+      detailEl.textContent = `⚠ 連線錯誤：${lastError}`;
     }
 
     completed++;
@@ -1803,9 +2282,12 @@ async function ytBatchAnalyze() {
   }
 
   barFill.style.width = '100%';
-  statusEl.className = 'sbox show ok';
-  msgEl.textContent = `✓ 完成！成功分析 ${successCount}／${total} 部電影`;
-  detailEl.textContent = '';
+  statusEl.className = successCount > 0 ? 'sbox show ok' : 'sbox show err';
+  msgEl.textContent = successCount > 0
+    ? `✓ 完成！成功分析 ${successCount}／${total} 部電影`
+    : `完成，但全部失敗（0／${total}）`;
+  detailEl.textContent = successCount < total && lastError ? `原因：${lastError}` : '';
+  if (successCount < total) toast(lastError || '批次分析失敗', 'err');
   document.getElementById('btn-batch-analyze').disabled = false;
   updateYtBatchBar();
   if (successCount > 0) await loadDb();
@@ -1978,11 +2460,11 @@ async function renderAppCards(cards) {
     html += `
       <div class="yt-card">
         <img class="yt-thumb" src="${poster}" alt="${c.title}" 
-             onerror="this.src='https://via.placeholder.com/500x280/1a1a1a/e8e6e1?text=載入失敗'">
+             onerror="this.onerror=null;this.src=PLACEHOLDER_POSTER">
         <div class="yt-info">
           <div class="yt-title">${c.title}</div>
           <div style="font-size:10px;color:#888;margin-top:4px">
-            ${c.genres.slice(0,2).join("、")}
+            ${c.year || movieYear(c) || '—'} · ${(c.genres || []).slice(0,2).join("、")}
           </div>
         </div>
         <div style="padding:8px;display:flex;gap:6px">
