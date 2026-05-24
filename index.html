@@ -2564,6 +2564,23 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function formatAppCardActors(card, maxNames = 3) {
+  const raw = String(card.actors || "").trim();
+  if (!raw) return "";
+  const names = raw.split(/[、,，]/).map(s => s.trim()).filter(Boolean);
+  if (names.length <= maxNames) return raw;
+  return names.slice(0, maxNames).join("、") + "…";
+}
+
+function appCardActorsHtml(card) {
+  const text = formatAppCardActors(card);
+  const style = text
+    ? "font-size:9px;color:var(--text2);margin-top:4px;line-height:1.35"
+    : "font-size:9px;color:var(--text3);margin-top:4px";
+  const label = text ? escapeHtml(text) : "—";
+  return `<div style="${style}">演員：${label}</div>`;
+}
+
 // APP 卡片：mode=recommend 簡潔列表；mode=analyze 排名＋分數＋推薦理由標籤
 async function renderAppCards(cards, opts = {}) {
   const grid = document.getElementById("app-cards-grid");
@@ -2587,10 +2604,13 @@ async function renderAppCards(cards, opts = {}) {
     const title = escapeHtml(c.title);
     const reasons = (c.matchReasons || []).slice(0, 5);
 
+    const actorsLine = appCardActorsHtml(c);
+
     let metaBlock = `
       <div style="font-size:10px;color:#888;margin-top:4px">
         ${escapeHtml(c.year || movieYear(c) || "—")} · ${escapeHtml((c.genres || []).slice(0, 2).join("、"))}
-      </div>`;
+      </div>
+      ${actorsLine}`;
 
     if (mode === "analyze") {
       const chips = reasons.length
@@ -2609,6 +2629,7 @@ async function renderAppCards(cards, opts = {}) {
         <div style="font-size:10px;color:#888;margin-top:2px">
           ${escapeHtml(c.year || movieYear(c) || "—")} · ${escapeHtml((c.genres || []).slice(0, 2).join("、"))}
         </div>
+        ${actorsLine}
         <div style="margin-top:6px;line-height:1.4"><span style="font-size:9px;color:var(--text3)">推薦理由：</span>${chips}</div>`;
       html += `
       <div class="yt-card" style="border-color:rgba(212,242,122,0.25)">
