@@ -2712,15 +2712,74 @@ async function loadUserAnalyze() {
 async function loadUserStats() {
   try {
     const s = await getUserStats();
-    const users = (s.users || []).map(u =>
-      `${u.userName}（👍${u.likeCount} / 👎${u.dislikeCount}）`
-    ).join(" · ") || "尚無";
-    const genres = (s.topGenresAcrossUsers || []).map(x => x.tag).join("、") || "—";
+    const userCount = s.userCount || 0;
+    const totalLikes = s.totalLikes || 0;
+    const totalDislikes = s.totalDislikes || 0;
+    const totalVotes = Math.max(1, totalLikes + totalDislikes);
+    const likeRate = Math.round((totalLikes / totalVotes) * 100);
+
+    const topGenres = (s.topGenresAcrossUsers || []).slice(0, 10);
+    const genresHtml = topGenres.length
+      ? topGenres.map(g =>
+          `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:999px;background:var(--accent-dim);border:1px solid rgba(212,242,122,0.28);color:var(--accent);font-size:10px;margin:3px 6px 3px 0">
+            ${escapeHtml(g.tag)}
+            <span style="color:var(--text3);font-family:'DM Mono',monospace">×${g.weight}</span>
+          </span>`
+        ).join("")
+      : `<span style="color:var(--text3)">—</span>`;
+
+    const sortedUsers = (s.users || []).slice().sort((a, b) =>
+      (b.likeCount - a.likeCount) || (a.dislikeCount - b.dislikeCount)
+    );
+    const usersHtml = sortedUsers.length
+      ? sortedUsers.map((u, idx) => {
+          const total = Math.max(1, (u.likeCount || 0) + (u.dislikeCount || 0));
+          const likePct = Math.round(((u.likeCount || 0) / total) * 100);
+          const dislikePct = 100 - likePct;
+          const rankBadge = idx < 3
+            ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;border-radius:999px;background:var(--accent-dim);color:var(--accent);font-size:9px;font-family:'DM Mono',monospace">#${idx + 1}</span>`
+            : `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;border-radius:999px;background:rgba(255,255,255,0.04);color:var(--text3);font-size:9px;font-family:'DM Mono',monospace">#${idx + 1}</span>`;
+          return `
+          <div style="padding:9px 0;border-bottom:1px dashed rgba(255,255,255,0.08)">
+            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+              <span style="font-size:11px;display:flex;align-items:center;gap:6px">${rankBadge}${escapeHtml(u.userName)}</span>
+              <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace">👍 ${u.likeCount} · 👎 ${u.dislikeCount}</span>
+            </div>
+            <div style="margin-top:6px;height:6px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;display:flex">
+              <div style="width:${likePct}%;background:var(--accent)"></div>
+              <div style="width:${dislikePct}%;background:rgba(242,122,122,0.55)"></div>
+            </div>
+          </div>`;
+        }).join("")
+      : `<div style="font-size:11px;color:var(--text3)">尚無使用者資料</div>`;
+
     document.getElementById("app-status").innerHTML = `
-      <div class="sbox show ok" style="font-size:12px;line-height:1.6">
-        <div><b>使用者</b> ${s.userCount || 0} 人 · <b>總喜歡</b> ${s.totalLikes || 0} · <b>總不喜歡</b> ${s.totalDislikes || 0}</div>
-        <div style="margin-top:4px"><b>熱門偏好類型</b>：${genres}</div>
-        <div style="margin-top:4px;color:var(--text3)">${users}</div>
+      <div class="sbox show ok" style="font-size:12px;line-height:1.55;padding:14px;background:linear-gradient(180deg,rgba(212,242,122,0.05),rgba(255,255,255,0.01));border-color:rgba(212,242,122,0.22)">
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:8px;margin-bottom:10px">
+          <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
+            <div style="font-size:10px;color:var(--text3)">使用者</div>
+            <div style="font-size:17px;font-weight:700">${userCount}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
+            <div style="font-size:10px;color:var(--text3)">總喜歡</div>
+            <div style="font-size:17px;font-weight:700;color:var(--accent)">${totalLikes}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
+            <div style="font-size:10px;color:var(--text3)">總不喜歡</div>
+            <div style="font-size:17px;font-weight:700;color:var(--red)">${totalDislikes}</div>
+          </div>
+        </div>
+        <div style="margin:2px 0 10px 0;padding:7px 9px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <span style="font-size:11px"><b>整體喜歡率</b></span>
+          <span style="font-size:12px;font-family:'DM Mono',monospace;color:var(--accent)">${likeRate}%</span>
+        </div>
+        <div style="font-size:11px;margin-bottom:8px"><b>熱門偏好類型</b></div>
+        <div style="margin-bottom:10px">${genresHtml}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <div style="font-size:11px"><b>使用者明細（依喜歡數排序）</b></div>
+          <div style="font-size:10px;color:var(--text3)">綠：喜歡｜紅：不喜歡</div>
+        </div>
+        <div style="max-height:180px;overflow:auto;padding-right:4px">${usersHtml}</div>
       </div>`;
     document.getElementById("app-profile").style.display = "none";
   } catch (e) {
