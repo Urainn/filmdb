@@ -85,6 +85,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .chip.sc { border-color: rgba(122,184,242,0.28); color: var(--blue); }
 .chip.gn { border-color: rgba(212,242,122,0.28); color: var(--accent); }
 .chip.md { border-color: rgba(242,201,122,0.28); color: var(--amber); }
+.chip.atm { border-color: rgba(184,122,242,0.28); color: #c9a0ff; }
 .thumb { width: 60px; height: 34px; object-fit: cover; border-radius: 4px; background: var(--surface2); display: block; cursor: pointer; }
 
 .field { margin-bottom: 11px; }
@@ -201,6 +202,12 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="nav-item" onclick="go('sheets',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/></svg>APP 電影卡片
     </div>
+    <div class="nav-item" onclick="go('user-analyze',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 13V3h12v10"/><path d="M5 10l2-3 2 2 3-5"/></svg>喜好分析
+    </div>
+    <div class="nav-item" onclick="go('user-stats',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>全站喜好統計
+    </div>
     <div class="nav-item" onclick="go('admin-push',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v10H2z"/><path d="M5 7h6M5 10h4"/></svg>後台分析推送
     </div>
@@ -256,7 +263,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <thead><tr>
           <th style="width:34px">選</th><th style="width:66px">縮圖</th><th>電影名稱</th>
           <th style="width:52px">年份</th>
-          <th>主要場景</th><th>次要場景</th><th>類型／情感</th><th>演員名單</th><th style="width:150px">操作</th>
+          <th>主要場景</th><th>次要場景</th><th>類型</th><th>情緒</th><th>氛圍</th><th>演員名單</th><th style="width:150px">操作</th>
         </tr></thead>
         <tbody id="list-body"></tbody>
       </table>
@@ -275,7 +282,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="steps">
       <div class="step s-active" id="s1">
         <div class="step-head"><div class="step-n">1</div><div class="step-title">輸入 YouTube 預告片網址</div></div>
-        <div class="step-desc">貼上完整連結，Gemini 會直接分析影片產生場景、類型、情感標籤</div>
+        <div class="step-desc">貼上完整連結，Gemini 會直接分析影片產生場景、類型、情緒與氛圍標籤</div>
         <div class="field">
           <input class="fi" id="f-url" type="text" placeholder="https://www.youtube.com/watch?v=..." oninput="onUrl()">
           <div id="yt-tag" style="min-height:20px;margin-top:4px"></div>
@@ -314,7 +321,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         </div>
         <div class="field"><label class="fl">次要場景</label><input class="fi" id="f-scenes-sub" type="text"></div>
         <div class="field"><label class="fl">類型關鍵字</label><input class="fi" id="f-genres" type="text"></div>
-        <div class="field"><label class="fl">情感／氛圍</label><input class="fi" id="f-moods" type="text"></div>
+        <div class="field"><label class="fl">情緒標籤</label><input class="fi" id="f-emotions" type="text"><div class="fhint">觀眾觀影時的情緒反應，如緊張、感動、爆笑</div></div>
+        <div class="field"><label class="fl">氛圍標籤</label><input class="fi" id="f-atmospheres" type="text"><div class="fhint">畫面與聽覺質感，如黑暗、夢幻、復古、華麗</div></div>
         <div class="field"><label class="fl">演員名單</label><input class="fi" id="f-cast" type="text"></div>
         <div class="btn-row">
           <button class="btn btn-accent" onclick="saveEntry()">✓ 儲存到雲端資料庫</button>
@@ -448,11 +456,11 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div class="btn-row">
         <button class="btn" onclick="loadAppCards()">載入全部 APP 卡片</button>
         <button class="btn btn-accent" onclick="loadAppRecommend()">載入個人化推薦</button>
-        <button class="btn" onclick="loadUserAnalyze()">喜好分析（含推薦理由）</button>
-        <button class="btn btn-sm" onclick="loadUserStats()">全站喜好統計</button>
+        <button class="btn" onclick="openUserAnalyze()">→ 喜好分析頁</button>
+        <button class="btn btn-sm" onclick="openUserStats()">→ 全站統計頁</button>
       </div>
       <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5">
-        喜歡／不喜歡會寫入 Google Sheets 工作表 <code>user_prefs</code>，重啟伺服器後仍保留。推薦依你已喜歡影片的類型、情緒、場景標籤加權計分。<br>
+        喜歡／不喜歡會寫入 Google Sheets 工作表 <code>user_prefs</code>，重啟伺服器後仍保留。推薦依你已喜歡影片的類型、情緒、氛圍、場景標籤加權計分。<br>
         <b>APP 海報請打 API</b>（勿直接讀 Sheets 原始 JSON）：<code>GET /api/sheets_card</code> 回傳的 <code>poster</code> 與 <code>thumb</code> 已與後台相同（TMDB／YouTube 自動補圖）。
       </p>
     </div>
@@ -460,6 +468,47 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div id="app-status" style="margin-bottom:16px"></div>
     <div id="app-profile" style="margin-bottom:16px;display:none"></div>
     <div id="app-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px"></div>
+  </div>
+
+  <!-- USER PREFERENCE ANALYZE -->
+  <div id="panel-user-analyze" class="panel">
+    <div class="page-head">
+      <div>
+        <div class="page-title">個人喜好分析</div>
+        <div class="page-sub">依使用者已標記的喜歡／不喜歡，產生偏好輪廓與含分數、推薦理由的片單（<code>POST /api/user/analyze</code>）</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-accent" onclick="loadUserAnalyze()">執行分析</button>
+      </div>
+    </div>
+    <div style="max-width:640px;margin-bottom:20px">
+      <div class="field">
+        <label class="fl">使用者名稱</label>
+        <input class="fi" id="analyze-user" type="text" placeholder="與 APP 上傳 sync/push 時的 userName 相同">
+      </div>
+      <p style="font-size:11px;color:var(--text3);line-height:1.5;margin-top:8px">
+        需先在「APP 電影卡片」或手機 APP 對該使用者標記喜歡。分析結果含排名、加權分數與推薦理由標籤。
+      </p>
+    </div>
+    <div id="analyze-status" style="margin-bottom:16px"></div>
+    <div id="analyze-profile" style="margin-bottom:16px;display:none"></div>
+    <div id="analyze-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px"></div>
+  </div>
+
+  <!-- SITE-WIDE USER STATS -->
+  <div id="panel-user-stats" class="panel">
+    <div class="page-head">
+      <div>
+        <div class="page-title">全站喜好統計</div>
+        <div class="page-sub">所有使用者的喜歡／不喜歡彙總與熱門類型（<code>GET /api/user/stats</code>）</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-accent" onclick="loadUserStats()">↻ 重新整理</button>
+      </div>
+    </div>
+    <div id="stats-dashboard" style="max-width:720px">
+      <div class="sbox show loading"><span class="spin"></span>載入統計中…</div>
+    </div>
   </div>
 
   <!-- ADMIN PUSH -->
@@ -597,7 +646,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="field"><label class="fl">主要場景</label><input class="fi" id="e-scenes-main" type="text"></div>
     <div class="field"><label class="fl">次要場景</label><input class="fi" id="e-scenes-sub" type="text"></div>
     <div class="field"><label class="fl">類型關鍵字</label><input class="fi" id="e-genres" type="text"></div>
-    <div class="field"><label class="fl">情感／氛圍</label><input class="fi" id="e-moods" type="text"></div>
+    <div class="field"><label class="fl">情緒標籤</label><input class="fi" id="e-emotions" type="text"></div>
+    <div class="field"><label class="fl">氛圍標籤</label><input class="fi" id="e-atmospheres" type="text"></div>
     <div class="field">
       <label class="fl">演員名單</label>
       <input class="fi" id="e-actors" type="text">
@@ -643,6 +693,26 @@ function movieYear(m) {
   return yearFromDate(m.publishedAt);
 }
 
+function movieEmotions(m) {
+  const emotions = m?.emotions || [];
+  const atmospheres = m?.atmospheres || [];
+  const legacy = m?.moods || [];
+  if (!emotions.length && !atmospheres.length && legacy.length) return legacy;
+  return emotions;
+}
+
+function movieAtmospheres(m) {
+  const emotions = m?.emotions || [];
+  const atmospheres = m?.atmospheres || [];
+  const legacy = m?.moods || [];
+  if (!emotions.length && !atmospheres.length && legacy.length) return [];
+  return atmospheres;
+}
+
+function movieTagTexts(m) {
+  return [...movieEmotions(m), ...movieAtmospheres(m)];
+}
+
 function readYearInput(id) {
   const raw = document.getElementById(id)?.value.trim() || '';
   if (!raw) return '';
@@ -660,7 +730,8 @@ let reanalyzeSelectedIds = new Set();
 let reanalyzeRunning = false;
 
 // 與後端 recommend_engine.DEFAULT_WEIGHTS 對齊（展示用說明）
-const WEIGHT_LIKE_MOOD = 2;
+const WEIGHT_LIKE_EMOTION = 2;
+const WEIGHT_LIKE_ATMOSPHERE = 2;
 const WEIGHT_LIKE_GENRE = 3;
 const WEIGHT_LIKE_SCENE = 1;
 
@@ -702,7 +773,7 @@ function updateStats() {
   db.forEach(m => {
     (m.scenes||[]).forEach(t=>sc.add(t));
     (m.genres||[]).forEach(t=>gn.add(t));
-    (m.moods||[]).forEach(t=>gn.add(t));
+    movieTagTexts(m).forEach(t=>gn.add(t));
   });
   document.getElementById('s-count').textContent = db.length;
   document.getElementById('s-scenes').textContent = sc.size;
@@ -734,13 +805,32 @@ function go(name, el) {
   document.getElementById('panel-'+name).classList.add('active');
   if (el) el.classList.add('active');
   else {
-    const map = {list:0, add:1, 'search-yt':2, sheets:3, 'admin-push':4, io:5, settings:6};
+    const map = {
+      list: 0, add: 1, 'search-yt': 2, sheets: 3,
+      'user-analyze': 4, 'user-stats': 5, 'admin-push': 6, io: 7, settings: 8
+    };
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
   if (name === 'add') resetAdd();
   if (name === 'settings') loadKeyStatus();
   if (name === 'admin-push') loadAdminPushDashboard();
+  if (name === 'user-stats') loadUserStats();
+}
+
+function syncAnalyzeUserFromApp() {
+  const app = document.getElementById("app-user")?.value?.trim();
+  if (app) document.getElementById("analyze-user").value = app;
+}
+
+function openUserAnalyze() {
+  syncAnalyzeUserFromApp();
+  go("user-analyze", null);
+  loadUserAnalyze();
+}
+
+function openUserStats() {
+  go("user-stats", null);
 }
 
 const PLACEHOLDER_POSTER = "data:image/svg+xml," + encodeURIComponent(
@@ -900,7 +990,7 @@ async function lazyEnhanceListPosters(rows) {
 async function renderList() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   const rows = q ? db.filter(m =>
-    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
+    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...movieTagTexts(m)].join(' ').toLowerCase().includes(q)
   ) : [...db];
 
   const body = document.getElementById('list-body');
@@ -935,10 +1025,9 @@ async function renderList() {
         <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--text2);vertical-align:middle">${movieYear(m) || '—'}</td>
         <td><div class="chips">${(m.scenesMain||[]).map(t=>`<span class="chip sc">${t}</span>`).join('')}</div></td>
         <td><div class="chips">${(m.scenesSub||[]).map(t=>`<span class="chip sc" style="opacity:0.7">${t}</span>`).join('')}</div></td>
-        <td><div class="chips">
-          ${(m.genres||[]).map(t=>`<span class="chip gn">${t}</span>`).join('')}
-          ${(m.moods||[]).map(t=>`<span class="chip md">${t}</span>`).join('')}
-        </div></td>
+        <td><div class="chips">${(m.genres||[]).map(t=>`<span class="chip gn">${t}</span>`).join('')}</div></td>
+        <td><div class="chips">${movieEmotions(m).map(t=>`<span class="chip md">${t}</span>`).join('')}</div></td>
+        <td><div class="chips">${movieAtmospheres(m).map(t=>`<span class="chip atm">${t}</span>`).join('')}</div></td>
         <td><div class="td-actors" style="font-size:12px;color:var(--text);">${m.actors || '未填寫'}</div></td>
         <td><div class="td-acts" style="text-align:right;">
           <button class="btn btn-sm" onclick="reanalyzeOne('${m.id}')">重析</button>
@@ -965,7 +1054,7 @@ async function del(id, title) {
 function currentListRows() {
   const q = document.getElementById('list-q').value.trim().toLowerCase();
   return q ? db.filter(m =>
-    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...(m.moods||[])].join(' ').toLowerCase().includes(q)
+    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...movieTagTexts(m)].join(' ').toLowerCase().includes(q)
   ) : [...db];
 }
 
@@ -1099,7 +1188,8 @@ async function runReanalyzeQueue(items) {
           scenesSub: ss,
           scenes: [...sm, ...ss],
           genres: p.genres || [],
-          moods: p.moods || [],
+          emotions: p.emotions || [],
+          atmospheres: p.atmospheres || [],
           year: resolveSaveYear(m, item, p)
         };
         await apiFetch('/db', { method: 'POST', body: JSON.stringify(updated) });
@@ -1142,7 +1232,7 @@ function resetAdd() {
   document.getElementById('s1').className = 'step s-active';
   document.getElementById('s2').style.display = 'none';
   document.getElementById('s3').style.display = 'none';
-  ['f-title','f-year','f-desc','f-scenes-main','f-scenes-sub','f-genres','f-moods','f-cast'].forEach(id => {
+  ['f-title','f-year','f-desc','f-scenes-main','f-scenes-sub','f-genres','f-emotions','f-atmospheres','f-cast'].forEach(id => {
     document.getElementById(id).value = '';
   });
 }
@@ -1274,10 +1364,13 @@ async function analyze() {
   if (!r || !r.ok) {
     finishProgress();
     const st = document.getElementById('analyze-status');
+    const errMsg = formatAnalyzeError(r?.error || '分析失敗，請重新試一次');
     st.className = 'sbox show err';
-    st.innerHTML = '✗ 分析失敗，請重新試一次';
+    st.innerHTML = `✗ ${escapeHtml(errMsg)}`;
     document.getElementById('btn-analyze').disabled = false;
     document.getElementById('s1').className = 'step s-active';
+    document.getElementById('s2').style.display = 'none';
+    toast(errMsg, 'err');
     return;
   }
 
@@ -1295,7 +1388,8 @@ async function analyze() {
   document.getElementById('f-scenes-main').value = join(p.scenes_main);
   document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
   document.getElementById('f-genres').value = join(p.genres);
-  document.getElementById('f-moods').value = join(p.moods);
+  document.getElementById('f-emotions').value = join(p.emotions || p.moods);
+  document.getElementById('f-atmospheres').value = join(p.atmospheres);
   document.getElementById('f-cast').value = join(p.cast || p.actors || []);
 
   document.getElementById('s2').style.display = 'none';
@@ -1332,7 +1426,8 @@ async function saveEntry() {
     desc: document.getElementById('f-desc').value.trim(),
     scenesMain: sm, scenesSub: ss, scenes: [...sm, ...ss],
     genres: split(document.getElementById('f-genres').value),
-    moods: split(document.getElementById('f-moods').value),
+    emotions: split(document.getElementById('f-emotions').value),
+    atmospheres: split(document.getElementById('f-atmospheres').value),
     actors: split(document.getElementById('f-cast').value).join('、')
   };
 
@@ -1355,7 +1450,8 @@ function openEdit(id) {
   document.getElementById('e-scenes-main').value = join(m.scenesMain||[]);
   document.getElementById('e-scenes-sub').value = join(m.scenesSub||[]);
   document.getElementById('e-genres').value = join(m.genres);
-  document.getElementById('e-moods').value = join(m.moods);
+  document.getElementById('e-emotions').value = join(movieEmotions(m));
+  document.getElementById('e-atmospheres').value = join(movieAtmospheres(m));
   document.getElementById('e-actors').value = m.actors || '';
   document.getElementById('edit-mo').classList.add('open');
 }
@@ -1380,7 +1476,8 @@ async function saveEdit() {
     desc: document.getElementById('e-desc').value.trim(),
     scenesMain: sm, scenesSub: ss, scenes: [...sm, ...ss],
     genres: split(document.getElementById('e-genres').value),
-    moods: split(document.getElementById('e-moods').value),
+    emotions: split(document.getElementById('e-emotions').value),
+    atmospheres: split(document.getElementById('e-atmospheres').value),
     actors: document.getElementById('e-actors').value.trim()
   };
   try {
@@ -2156,7 +2253,8 @@ async function tmdbAutoImport() {
               scenesSub: ss,
               scenes: [...sm, ...ss],
               genres: p.genres || item.tmdbGenres || [],
-              moods: p.moods || [],
+              emotions: p.emotions || [],
+              atmospheres: p.atmospheres || [],
               actors: (p.cast || p.actors || []).join('、'),
               year: item.year || movieYear({ publishedAt: item.publishedAt }) || yearFromDate(item.publishedAt),
               publishedAt: item.publishedAt || ''
@@ -2314,7 +2412,8 @@ async function ytBatchAnalyze() {
           scenesMain: sm, scenesSub: ss,
           scenes: [...sm, ...ss],
           genres: p.genres || [],
-          moods: p.moods || [],
+          emotions: p.emotions || [],
+          atmospheres: p.atmospheres || [],
           actors: (p.cast || p.actors || []).join('、'),
           year: resolveSaveYear(null, item, p),
           publishedAt: item.publishedAt || ''
@@ -2527,14 +2626,16 @@ async function getUserStats() {
   return res.json();
 }
 
-function renderUserProfile(profile, coldStart, detailed = false) {
-  const el = document.getElementById("app-profile");
+function renderUserProfile(profile, coldStart, detailed = false, profileElId = "app-profile") {
+  const el = document.getElementById(profileElId);
+  if (!el) return;
   if (!profile) {
     el.style.display = "none";
     return;
   }
   const genres = (profile.topGenres || []).map(x => x.tag).join("、") || "—";
-  const moods = (profile.topMoods || []).map(x => x.tag).join("、") || "—";
+  const emotions = (profile.topEmotions || []).map(x => x.tag).join("、") || "—";
+  const atmospheres = (profile.topAtmospheres || []).map(x => x.tag).join("、") || "—";
   const scenes = (profile.topScenes || []).map(x => x.tag).join("、") || "—";
   const avoid = (profile.avoidGenres || []).map(x => x.tag).join("、") || "—";
   const liked = (profile.likedTitles || []).slice(0, 8).join("、") || "尚無";
@@ -2546,12 +2647,13 @@ function renderUserProfile(profile, coldStart, detailed = false) {
       ${coldStart ? "<div style='color:var(--warn);margin-bottom:6px'>尚未標記喜歡，目前為冷啟動（顯示片庫前幾部）</div>" : ""}
       <div><b>已喜歡</b> ${profile.likeCount || 0} 部 · <b>不喜歡</b> ${profile.dislikeCount || 0} 部</div>
       <div style="margin-top:4px"><b>偏好類型</b>：${genres}</div>
-      <div><b>偏好情緒／關鍵詞</b>：${moods}</div>
+      <div><b>偏好情緒</b>：${emotions}</div>
+      <div><b>偏好氛圍</b>：${atmospheres}</div>
       ${detailed ? `<div><b>偏好場景</b>：${scenes}</div>
       <div style="margin-top:4px"><b>會避開的類型</b>：${avoid}</div>
       <div style="margin-top:4px;color:var(--text3)"><b>不喜歡</b>：${disliked}</div>` : ""}
       <div style="margin-top:4px;color:var(--text3)"><b>近期喜歡</b>：${liked}</div>
-      ${detailed ? `<div style="margin-top:8px;font-size:10px;color:var(--text3)">下方卡片依標籤加權排序（類型×${WEIGHT_LIKE_GENRE}、情緒×${WEIGHT_LIKE_MOOD}、場景×${WEIGHT_LIKE_SCENE}）</div>` : ""}
+      ${detailed ? `<div style="margin-top:8px;font-size:10px;color:var(--text3)">下方卡片依標籤加權排序（類型×${WEIGHT_LIKE_GENRE}、情緒×${WEIGHT_LIKE_EMOTION}、氛圍×${WEIGHT_LIKE_ATMOSPHERE}、場景×${WEIGHT_LIKE_SCENE}）</div>` : ""}
     </div>
   `;
 }
@@ -2583,10 +2685,12 @@ function appCardActorsHtml(card) {
 
 // APP 卡片：mode=recommend 簡潔列表；mode=analyze 排名＋分數＋推薦理由標籤
 async function renderAppCards(cards, opts = {}) {
-  const grid = document.getElementById("app-cards-grid");
-  const status = document.getElementById("app-status");
+  const grid = document.getElementById(opts.gridId || "app-cards-grid");
+  const status = document.getElementById(opts.statusId || "app-status");
   const mode = opts.mode || "list";
-  const appUser = (document.getElementById("app-user")?.value || "guest").replace(/'/g, "\\'");
+  const userInputId = opts.userInputId || "app-user";
+  if (!grid || !status) return;
+  const appUser = (document.getElementById(userInputId)?.value || "guest").replace(/'/g, "\\'");
 
   if (!cards.length) {
     grid.innerHTML = "<div style='color:#888'>無資料（可先標記幾部喜歡再載入推薦）</div>";
@@ -2680,19 +2784,21 @@ async function loadAppRecommend() {
 }
 
 async function loadUserAnalyze() {
-  const user = document.getElementById("app-user").value.trim();
+  const user = (document.getElementById("analyze-user")?.value || "").trim();
   if (!user) {
     alert("請輸入使用者名稱");
     return;
   }
-  const status = document.getElementById("app-status");
-  const grid = document.getElementById("app-cards-grid");
+  const status = document.getElementById("analyze-status");
+  const grid = document.getElementById("analyze-cards-grid");
+  const profileEl = document.getElementById("analyze-profile");
+  if (profileEl) profileEl.style.display = "none";
   status.innerHTML = `<div class="sbox show loading"><span class="spin"></span>分析喜好並計算推薦理由…</div>`;
   grid.innerHTML = "";
   try {
     const res = await getUserAnalyze(user, 24);
     if (!res.ok) throw new Error(res.error || "分析失敗");
-    renderUserProfile(res.profile, res.coldStart, true);
+    renderUserProfile(res.profile, res.coldStart, true, "analyze-profile");
     const recs = res.recommendations || [];
     if (!recs.length) {
       status.innerHTML = `<div class="sbox show">尚無可推薦影片（請先對幾部片按 👍）</div>`;
@@ -2701,6 +2807,9 @@ async function loadUserAnalyze() {
     }
     await renderAppCards(recs, {
       mode: "analyze",
+      gridId: "analyze-cards-grid",
+      statusId: "analyze-status",
+      userInputId: "analyze-user",
       label: `喜好分析 · ${user} · ${recs.length} 部（含排名、分數、推薦理由標籤）`
     });
   } catch (e) {
@@ -2710,6 +2819,9 @@ async function loadUserAnalyze() {
 }
 
 async function loadUserStats() {
+  const dash = document.getElementById("stats-dashboard");
+  if (!dash) return;
+  dash.innerHTML = `<div class="sbox show loading"><span class="spin"></span>載入統計中…</div>`;
   try {
     const s = await getUserStats();
     const userCount = s.userCount || 0;
@@ -2753,7 +2865,7 @@ async function loadUserStats() {
         }).join("")
       : `<div style="font-size:11px;color:var(--text3)">尚無使用者資料</div>`;
 
-    document.getElementById("app-status").innerHTML = `
+    dash.innerHTML = `
       <div class="sbox show ok" style="font-size:12px;line-height:1.55;padding:14px;background:linear-gradient(180deg,rgba(212,242,122,0.05),rgba(255,255,255,0.01));border-color:rgba(212,242,122,0.22)">
         <div style="display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:8px;margin-bottom:10px">
           <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
@@ -2781,9 +2893,9 @@ async function loadUserStats() {
         </div>
         <div style="max-height:180px;overflow:auto;padding-right:4px">${usersHtml}</div>
       </div>`;
-    document.getElementById("app-profile").style.display = "none";
   } catch (e) {
     toast("統計載入失敗", "err");
+    dash.innerHTML = `<div class="sbox show err">統計載入失敗</div>`;
   }
 }
 

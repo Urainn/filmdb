@@ -10,22 +10,40 @@ from typing import Any
 
 DEFAULT_WEIGHTS = {
     "like_genre": 3,
-    "like_mood": 2,
+    "like_emotion": 2,
+    "like_atmosphere": 2,
     "like_scene": 1,
     "dislike_genre": 5,
-    "dislike_mood": 3,
+    "dislike_emotion": 3,
+    "dislike_atmosphere": 3,
     "dislike_scene": 2,
 }
+
+
+def _tag_list(value) -> list[str]:
+    return [str(x).strip() for x in (value or []) if str(x).strip()]
+
+
+def movie_emotion_atmosphere_tags(movie: dict) -> tuple[list[str], list[str]]:
+    """Read emotions / atmospheres; fall back to legacy moods field."""
+    emotions = _tag_list(movie.get("emotions"))
+    atmospheres = _tag_list(movie.get("atmospheres"))
+    legacy = _tag_list(movie.get("moods"))
+    if not emotions and not atmospheres and legacy:
+        emotions = legacy
+    return emotions, atmospheres
 
 
 def _movie_tags(movie: dict) -> dict[str, list[str]]:
     scenes = list(movie.get("scenesMain") or []) + list(movie.get("scenesSub") or [])
     if not scenes and movie.get("scenes"):
         scenes = list(movie.get("scenes") or [])
+    emotions, atmospheres = movie_emotion_atmosphere_tags(movie)
     return {
-        "genres": [str(x).strip() for x in (movie.get("genres") or []) if str(x).strip()],
-        "moods": [str(x).strip() for x in (movie.get("moods") or []) if str(x).strip()],
-        "scenes": [str(x).strip() for x in scenes if str(x).strip()],
+        "genres": _tag_list(movie.get("genres")),
+        "emotions": emotions,
+        "atmospheres": atmospheres,
+        "scenes": _tag_list(scenes),
     }
 
 
@@ -34,7 +52,12 @@ def build_tag_profile(
     movie_ids: list[str],
     weight: float = 1.0,
 ) -> dict[str, Counter]:
-    profile = {"genres": Counter(), "moods": Counter(), "scenes": Counter()}
+    profile = {
+        "genres": Counter(),
+        "emotions": Counter(),
+        "atmospheres": Counter(),
+        "scenes": Counter(),
+    }
     for mid in movie_ids:
         movie = movies_by_id.get(mid)
         if not movie:
@@ -71,7 +94,9 @@ def summarize_profile(movies_by_id: dict[str, dict], user_prefs: dict) -> dict:
         "likedTitles": liked_titles[:20],
         "dislikedTitles": disliked_titles[:20],
         "topGenres": _top_items(like_prof["genres"]),
-        "topMoods": _top_items(like_prof["moods"]),
+        "topEmotions": _top_items(like_prof["emotions"]),
+        "topAtmospheres": _top_items(like_prof["atmospheres"]),
+        "topMoods": _top_items(like_prof["emotions"] + like_prof["atmospheres"]),
         "topScenes": _top_items(like_prof["scenes"]),
         "avoidGenres": _top_items(dislike_prof["genres"], 5),
     }
@@ -106,11 +131,16 @@ def score_movie(
         if w:
             score += w
             add_reason("類型", g, w)
-    for m in tags["moods"]:
-        w = like_profile["moods"].get(m, 0) * weights["like_mood"]
+    for e in tags["emotions"]:
+        w = like_profile["emotions"].get(e, 0) * weights["like_emotion"]
         if w:
             score += w
-            add_reason("情緒", m, w)
+            add_reason("情緒", e, w)
+    for a in tags["atmospheres"]:
+        w = like_profile["atmospheres"].get(a, 0) * weights["like_atmosphere"]
+        if w:
+            score += w
+            add_reason("氛圍", a, w)
     for s in tags["scenes"]:
         w = like_profile["scenes"].get(s, 0) * weights["like_scene"]
         if w:
@@ -121,8 +151,12 @@ def score_movie(
         w = dislike_profile["genres"].get(g, 0) * weights["dislike_genre"]
         if w:
             score -= w
-    for m in tags["moods"]:
-        w = dislike_profile["moods"].get(m, 0) * weights["dislike_mood"]
+    for e in tags["emotions"]:
+        w = dislike_profile["emotions"].get(e, 0) * weights["dislike_emotion"]
+        if w:
+            score -= w
+    for a in tags["atmospheres"]:
+        w = dislike_profile["atmospheres"].get(a, 0) * weights["dislike_atmosphere"]
         if w:
             score -= w
     for s in tags["scenes"]:
