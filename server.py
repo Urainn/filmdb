@@ -25,6 +25,13 @@ from recommend_engine import (
     ranked_movies,
     summarize_profile,
 )
+from search_synonyms import (
+    DEFAULT_SEARCH_SYNONYM_GROUPS,
+    build_synonym_map,
+    expand_search_terms,
+    normalize_synonym_groups,
+    text_matches_expanded_query,
+)
 from user_sync import (
     build_sync_pull_payload,
     merge_client_prefs,
@@ -100,6 +107,8 @@ _gemini_keys = []
 _key_lock = threading.Lock()
 _key_index = 0
 _sheet_id_cache = None
+_search_synonyms_cache = None
+_search_synonyms_lock = threading.Lock()
 
 # 使用者喜好：啟動時從 Google Sheets 載入，like/dislike 時寫回
 user_behavior = {}
@@ -221,6 +230,63 @@ def ensure_config_sheet():
         print(f"  ensure_config_sheet 錯誤: {e}")
 
 
+def read_config_rows():
+    try:
+        ensure_config_sheet()
+        encoded = urllib.parse.quote(f"{CONFIG_SHEET}!A:B")
+        return sheets_request("GET", f"/values/{encoded}").get("values", [])
+    except Exception as e:
+        print(f"  read_config_rows 錯誤: {e}")
+        return []
+
+
+def get_config_json(key: str, default):
+    for row in read_config_rows():
+        if len(row) >= 2 and row[0] == key and row[1].strip():
+            try:
+                return json.loads(row[1])
+            except Exception:
+                return default
+    return default
+
+
+def set_config_json(key: str, value) -> bool:
+    try:
+        ensure_config_sheet()
+        rows = read_config_rows()
+        other = [r for r in rows if not (r and r[0] == key)]
+        other.append([key, json.dumps(value, ensure_ascii=False)])
+        clear_range = urllib.parse.quote(f"{CONFIG_SHEET}!A:Z")
+        sheets_request("POST", f"/values/{clear_range}:clear", {})
+        start = urllib.parse.quote(f"{CONFIG_SHEET}!A1")
+        sheets_request("PUT", f"/values/{start}?valueInputOption=RAW", {"values": other})
+        return True
+    except Exception as e:
+        print(f"  set_config_json({key}) 錯誤: {e}")
+        return False
+
+
+def get_search_synonym_groups():
+    global _search_synonyms_cache
+    with _search_synonyms_lock:
+        if _search_synonyms_cache is not None:
+            return _search_synonyms_cache
+        raw = get_config_json("search_synonyms", None)
+        groups = normalize_synonym_groups(
+            raw if raw is not None else DEFAULT_SEARCH_SYNONYM_GROUPS
+        )
+        _search_synonyms_cache = groups
+        return groups
+
+
+def save_search_synonym_groups(groups) -> bool:
+    global _search_synonyms_cache
+    normalized = normalize_synonym_groups(groups)
+    ok = set_config_json("search_synonyms", normalized)
+    if ok:
+        with _search_synonyms_lock:
+            _search_synonyms_cache = normalized
+    return ok
 
 
 def get_gemini_keys():
@@ -1551,6 +1617,9 @@ class Handler(BaseHTTPRequestHandler):
             keys = get_gemini_keys()
             masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
             self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
+        elif path == "/api/search/synonyms":
+            groups = get_search_synonym_groups()
+            self.send_json(200, {"ok": True, "groups": groups, "count": len(groups)})
         elif path in ["/", "/index.html"]:
             if os.path.exists("index.html"):
                 with open("index.html", "r", encoding="utf-8") as f:
@@ -1563,6 +1632,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?")[0]
         body = self.read_body()
+
+        if path == "/api/search/synonyms":
+            groups = body.get("groups")
+            if not isinstance(groups, list):
+                self.send_json(400, {"ok": False, "error": "缺少 groups（陣列）"})
+                return
+            ok = save_search_synonym_groups(groups)
+            if ok:
+                saved = get_search_synonym_groups()
+                self.send_json(200, {"ok": True, "groups": saved, "count": len(saved)})
+            else:
+                self.send_json(500, {"ok": False, "error": "儲存相近詞字典失敗"})
+            return
 
         # ========== 多人同步：APP 上傳喜好 ==========
         if path == "/api/sync/push":

@@ -256,8 +256,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="font-size:10px;color:var(--text3);margin-top:4px;font-family:'DM Mono',monospace" id="reanalyze-detail"></div>
     </div>
     <div class="search-row">
-      <input class="search-inp" id="list-q" type="text" placeholder="搜尋片名、年份、場景、類型..." oninput="renderList()">
+      <input class="search-inp" id="list-q" type="text" placeholder="搜尋片名、年份、場景、類型…（支援相近詞，空白分隔多條件）" oninput="renderList()">
     </div>
+    <div id="list-search-hint" style="display:none;font-size:10.5px;color:var(--text3);margin:-10px 0 14px 0;line-height:1.5"></div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
@@ -626,6 +627,23 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         </div>
         <div class="sbox" id="keys-save-status" style="margin-top:10px"></div>
       </div>
+
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">搜尋相近詞字典</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
+          總覽搜尋列會用此字典擴展關鍵字。每行一組，逗號分隔同義／相近詞（至少 2 個詞）。<br>
+          例：<code style="font-size:10px">恐怖,驚悚,靈異,怪談</code> — 搜「恐怖」也會找到標有「驚悚」的片。
+        </div>
+        <div class="field">
+          <textarea class="fta" id="synonyms-input" rows="10" placeholder="恐怖,驚悚,靈異,怪談&#10;喜劇,搞笑,幽默,荒謬"></textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-accent" onclick="saveSearchSynonyms()">儲存字典</button>
+          <button class="btn btn-sm" onclick="loadSearchSynonyms()">重新載入</button>
+          <button class="btn btn-sm" onclick="resetSearchSynonyms()">還原預設</button>
+        </div>
+        <div class="sbox" id="synonyms-save-status" style="margin-top:10px"></div>
+      </div>
     </div>
   </div>
 
@@ -728,6 +746,8 @@ function resolveSaveYear(existing, item, analyzeData) {
 let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
 let reanalyzeRunning = false;
+let searchSynonymGroups = [];
+let searchSynonymMap = new Map();
 
 // 與後端 recommend_engine.DEFAULT_WEIGHTS 對齊（展示用說明）
 const WEIGHT_LIKE_EMOTION = 2;
@@ -813,7 +833,10 @@ function go(name, el) {
   }
   if (name === 'list') loadDb();
   if (name === 'add') resetAdd();
-  if (name === 'settings') loadKeyStatus();
+  if (name === 'settings') {
+    loadKeyStatus();
+    loadSearchSynonyms();
+  }
   if (name === 'admin-push') loadAdminPushDashboard();
   if (name === 'user-stats') loadUserStats();
 }
@@ -987,11 +1010,182 @@ async function lazyEnhanceListPosters(rows) {
   await Promise.all(Array.from({ length: concurrency }, worker));
 }
 
+function movieSearchText(m) {
+  return [
+    m.title,
+    movieYear(m),
+    m.desc || '',
+    m.actors || '',
+    ...(m.scenes || []),
+    ...(m.scenesMain || []),
+    ...(m.scenesSub || []),
+    ...(m.genres || []),
+    ...movieTagTexts(m),
+  ].join(' ').toLowerCase();
+}
+
+function rebuildSearchSynonymMap(groups) {
+  searchSynonymGroups = groups || [];
+  searchSynonymMap = new Map();
+  for (const group of searchSynonymGroups) {
+    const terms = group.map(t => String(t).trim().toLowerCase()).filter(Boolean);
+    if (terms.length < 2) continue;
+    const bucket = new Set(terms);
+    for (const term of terms) searchSynonymMap.set(term, bucket);
+  }
+}
+
+function expandSearchQuery(query) {
+  const parts = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!parts.length) return [];
+  return parts.map(part => [...(searchSynonymMap.get(part) || new Set([part]))]);
+}
+
+function movieMatchesSearch(m, query) {
+  const expanded = expandSearchQuery(query);
+  if (!expanded.length) return true;
+  const text = movieSearchText(m);
+  return expanded.every(group => group.some(term => text.includes(term)));
+}
+
+function searchHintHtml(query) {
+  const expanded = expandSearchQuery(query);
+  if (!expanded.length) return '';
+  const bits = expanded.map(group => {
+    if (group.length <= 1) return escapeHtml(group[0] || '');
+    return `${escapeHtml(group[0])} ≈ ${group.slice(1).map(t => escapeHtml(t)).join('、')}`;
+  });
+  return `相近詞擴展：${bits.join(' · ')}`;
+}
+
+function updateListSearchHint(query) {
+  const el = document.getElementById('list-search-hint');
+  if (!el) return;
+  const html = searchHintHtml(query);
+  if (!html) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = html;
+}
+
+function filterDbBySearch(query) {
+  const q = String(query || '').trim();
+  if (!q) return [...db];
+  return db.filter(m => movieMatchesSearch(m, q));
+}
+
+function parseSynonymTextarea(raw) {
+  return raw.split('\n').map(line => {
+    return line.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+  }).filter(g => g.length >= 2);
+}
+
+function formatSynonymTextarea(groups) {
+  return (groups || []).map(g => g.join(',')).join('\n');
+}
+
+async function loadSearchSynonyms() {
+  const ta = document.getElementById('synonyms-input');
+  try {
+    const r = await apiFetch('/api/search/synonyms');
+    if (!r.ok) throw new Error(r.error || '載入失敗');
+    rebuildSearchSynonymMap(r.groups || []);
+    if (ta) ta.value = formatSynonymTextarea(r.groups || []);
+    renderList();
+  } catch (e) {
+    if (ta && !ta.value.trim()) ta.placeholder = '無法載入字典：' + e.message;
+  }
+}
+
+async function saveSearchSynonyms() {
+  const ta = document.getElementById('synonyms-input');
+  const st = document.getElementById('synonyms-save-status');
+  if (!ta || !st) return;
+  const groups = parseSynonymTextarea(ta.value);
+  if (!groups.length) {
+    st.className = 'sbox show err';
+    st.textContent = '✗ 每行至少需要 2 個相近詞';
+    return;
+  }
+  st.className = 'sbox show loading';
+  st.innerHTML = '<span class="spin"></span> 儲存中...';
+  try {
+    const r = await apiFetch('/api/search/synonyms', {
+      method: 'POST',
+      body: JSON.stringify({ groups })
+    });
+    if (!r.ok) throw new Error(r.error || '儲存失敗');
+    rebuildSearchSynonymMap(r.groups || groups);
+    ta.value = formatSynonymTextarea(r.groups || groups);
+    st.className = 'sbox show ok';
+    st.textContent = `✓ 已儲存 ${(r.groups || groups).length} 組相近詞`;
+    renderList();
+    toast('相近詞字典已更新', 'ok');
+  } catch (e) {
+    st.className = 'sbox show err';
+    st.textContent = '✗ 儲存失敗：' + e.message;
+  }
+}
+
+function resetSearchSynonyms() {
+  const defaults = [
+    ['恐怖','驚悚','靈異','怪談','鬼片','懸疑'],
+    ['喜劇','搞笑','幽默','荒謬','輕喜劇'],
+    ['愛情','浪漫','虐戀','戀愛'],
+    ['科幻','奇幻','超自然','末日','賽博龐克'],
+    ['動作','武打','槍戰','打鬥'],
+    ['犯罪','黑幫','警匪','推理','罪案'],
+    ['心理驚悚','燒腦','反轉','懸而未決'],
+    ['溫馨','療癒','暖心','合家歡'],
+    ['黑暗','壓抑','陰鬱','沉重'],
+    ['緊張','刺激','高壓'],
+    ['感動','催淚','心碎'],
+    ['城市','都市','都會','街道'],
+    ['鄉村','小鎮','田園','農村'],
+    ['學校','教室','校園','宿舍'],
+    ['醫院','病房','醫療'],
+    ['監獄','囚禁','牢籠'],
+    ['森林','荒野','山林'],
+    ['海邊','海岸','海洋','漁村'],
+    ['公寓','住宅','老屋','弄巷'],
+    ['辦公室','職場','公司','加班'],
+    ['酒吧','夜店','居酒屋'],
+    ['青春','成長','少年','少女'],
+    ['家庭','親子','母女','父子'],
+    ['女性','女力','女性議題'],
+    ['同志','LGBT','酷兒','彩虹'],
+    ['武俠','古裝','江湖','仙俠'],
+    ['紀錄','紀錄片','社會議題'],
+    ['戰爭','軍事','戰場'],
+    ['動畫','卡通','anime'],
+    ['公路片','旅途','流浪','出走'],
+    ['實驗','獨立片','作者電影'],
+    ['台灣','國片','本土'],
+    ['華語','中文','國語片'],
+    ['香港','港片','粵語'],
+    ['日本','日系','日片'],
+    ['韓國','韓片'],
+    ['歐美','好萊塢','美國片'],
+    ['復古','懷舊','年代感'],
+    ['夢幻','迷幻','詩意'],
+    ['霓虹','賽博','夜生活'],
+    ['移民','異鄉','漂泊'],
+    ['底層','弱勢','小人物'],
+    ['復仇','報復'],
+    ['救贖','懺悔','和解'],
+    ['逃亡','亡命','躲藏'],
+  ];
+  const ta = document.getElementById('synonyms-input');
+  if (ta) ta.value = formatSynonymTextarea(defaults);
+}
+
 async function renderList() {
-  const q = document.getElementById('list-q').value.trim().toLowerCase();
-  const rows = q ? db.filter(m =>
-    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...movieTagTexts(m)].join(' ').toLowerCase().includes(q)
-  ) : [...db];
+  const q = document.getElementById('list-q').value.trim();
+  updateListSearchHint(q);
+  const rows = filterDbBySearch(q);
 
   const body = document.getElementById('list-body');
   const empty = document.getElementById('list-empty');
@@ -1052,10 +1246,8 @@ async function del(id, title) {
 }
 
 function currentListRows() {
-  const q = document.getElementById('list-q').value.trim().toLowerCase();
-  return q ? db.filter(m =>
-    [m.title, movieYear(m), m.desc||'', ...(m.scenes||[]), ...(m.genres||[]), ...movieTagTexts(m)].join(' ').toLowerCase().includes(q)
-  ) : [...db];
+  const q = document.getElementById('list-q').value.trim();
+  return filterDbBySearch(q);
 }
 
 function updateReanalyzeBar() {
@@ -3110,6 +3302,7 @@ function renderAdminPushPreview(doc) {
 // INIT
 // =====================================================================
 loadDb();
+loadSearchSynonyms();
 setInterval(loadDb, 300000);
 </script>
 </body>
