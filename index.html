@@ -609,7 +609,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <div class="field">
           <label class="fl">追加單筆 Gemini API Key</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <input class="fi" id="key-add-input" type="text" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1;min-width:260px">
+            <input class="fi" id="key-add-input" type="text" placeholder="AIza... 或 AQ...." style="flex:1;min-width:260px">
             <button class="btn btn-accent" onclick="addKey()">新增 Key</button>
           </div>
           <div style="font-size:10.5px;color:var(--text3);margin-top:3px">這裡會追加到現有清單，不會取代舊 Key</div>
@@ -617,7 +617,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 
         <div class="field">
           <label class="fl">Gemini API Keys（每行一組）</label>
-          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AIzaYYYYYYYYYYYYYYYYYYYYYYY&#10;AIzaZZZZZZZZZZZZZZZZZZZZZZZ"></textarea>
+          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AQ.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"></textarea>
           <div style="font-size:10.5px;color:var(--text3);margin-top:3px">儲存後舊的 Key 會被取代，請確認每行都是完整的 Key</div>
         </div>
 
@@ -2661,6 +2661,12 @@ async function ytBatchAnalyze() {
 // =====================================================================
 // API KEY 設定功能
 // =====================================================================
+const GEMINI_API_KEY_RE = /^(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_.-]{20,})$/;
+
+function isValidGeminiApiKey(key) {
+  return GEMINI_API_KEY_RE.test(String(key || '').trim());
+}
+
 async function loadKeyStatus() {
   const el = document.getElementById('keys-status');
   if (!el) return;
@@ -2685,9 +2691,9 @@ async function addKey() {
   const inp = document.getElementById('key-add-input');
   const st = document.getElementById('keys-save-status');
   const key = (inp?.value || '').trim();
-  if (!key.startsWith('AIza')) {
+  if (!isValidGeminiApiKey(key)) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
+    st.textContent = '✗ 請輸入有效的 Gemini API Key';
     return;
   }
 
@@ -2712,12 +2718,12 @@ async function addKey() {
 
 async function saveKeys() {
   const raw = document.getElementById('keys-input').value.trim();
-  const keys = raw.split('\n').map(k => k.trim()).filter(k => k.startsWith('AIza'));
+  const keys = raw.split('\n').map(k => k.trim()).filter(isValidGeminiApiKey);
   const st = document.getElementById('keys-save-status');
 
   if (keys.length === 0) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
+    st.textContent = '✗ 請輸入有效的 Gemini API Key';
     return;
   }
 
