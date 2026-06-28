@@ -44,7 +44,7 @@ from user_sync import (
 
 
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS") or """
 {
   "type": "service_account",
@@ -106,6 +106,12 @@ _token_lock = threading.Lock()
 _gemini_keys = []
 _key_lock = threading.Lock()
 _key_index = 0
+
+GEMINI_API_KEY_RE = re.compile(r"^(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_.-]{20,})$")
+
+
+def is_valid_gemini_api_key(key):
+    return bool(GEMINI_API_KEY_RE.match(str(key or "").strip()))
 _sheet_id_cache = None
 _search_synonyms_cache = None
 _search_synonyms_lock = threading.Lock()
@@ -1887,7 +1893,7 @@ class Handler(BaseHTTPRequestHandler):
         new_keys = []
         for key in incoming:
             key = str(key).strip()
-            if key.startswith("AIza") and key not in new_keys:
+            if is_valid_gemini_api_key(key) and key not in new_keys:
                 new_keys.append(key)
 
         if not new_keys:
