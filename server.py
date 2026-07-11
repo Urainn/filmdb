@@ -20,6 +20,9 @@ import traceback
 
 from recommend_engine import (
     DEFAULT_WEIGHTS,
+    TEMP_DISLIKE,
+    TEMP_LIKE,
+    clamp_temperature,
     global_user_stats,
     movie_emotion_atmosphere_tags,
     ranked_movies,
@@ -40,11 +43,19 @@ from user_sync import (
     push_is_stale,
     utc_now,
 )
+from room_sync import (
+    build_new_room,
+    normalize_room,
+    normalize_room_code,
+    room_add_member,
+    room_public_view,
+    rooms_overview,
+)
 
 
 
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyDs2IknIRxX_H8DRGR9er_oiBsbQWoYzDw")
 SHEETS_CREDS = os.environ.get("SHEETS_CREDS") or """
 {
   "type": "service_account",
@@ -66,6 +77,7 @@ CONFIG_SHEET = "config"
 USER_PREFS_SHEET = os.environ.get("USER_PREFS_SHEET", "user_prefs")
 PUSH_FEED_SHEET = os.environ.get("PUSH_FEED_SHEET", "push_feed")
 USER_EVENTS_SHEET = os.environ.get("USER_EVENTS_SHEET", "user_events")
+ROOMS_SHEET = os.environ.get("ROOMS_SHEET", "multi_rooms")
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
@@ -106,12 +118,6 @@ _token_lock = threading.Lock()
 _gemini_keys = []
 _key_lock = threading.Lock()
 _key_index = 0
-
-GEMINI_API_KEY_RE = re.compile(r"^(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_.-]{20,})$")
-
-
-def is_valid_gemini_api_key(key):
-    return bool(GEMINI_API_KEY_RE.match(str(key or "").strip()))
 _sheet_id_cache = None
 _search_synonyms_cache = None
 _search_synonyms_lock = threading.Lock()
@@ -122,6 +128,8 @@ _user_lock = threading.Lock()
 _user_prefs_sheet_id_cache = None
 _push_feed_cache = {}
 _push_feed_lock = threading.Lock()
+_rooms_cache = {}
+_rooms_lock = threading.Lock()
 
 
 def get_access_token():
@@ -213,7 +221,7 @@ def ensure_sheet():
     try:
         info = sheets_request("GET", "")
         names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        for name in [SHEET_NAME, CONFIG_SHEET, USER_PREFS_SHEET, PUSH_FEED_SHEET, USER_EVENTS_SHEET]:
+        for name in [SHEET_NAME, CONFIG_SHEET, USER_PREFS_SHEET, PUSH_FEED_SHEET, USER_EVENTS_SHEET, ROOMS_SHEET]:
             if name not in names:
                 sheets_request("POST", ":batchUpdate", {
                     "requests": [{"addSheet": {"properties": {"title": name}}}]
@@ -538,9 +546,22 @@ def persist_user_prefs(user_name):
     if not prefs:
         return
     try:
-        user_prefs_save_one(user_name, prefs)
+        user_prefs_save_one(user_name, normalize_prefs(prefs))
     except Exception as e:
         print(f"  persist_user_prefs 錯誤 ({user_name}): {e}")
+
+
+def set_user_temperature(user_name, movie_id, temperature):
+    """Set thermometer rating 0–100 and sync legacy like/dislike lists."""
+    u = get_user_prefs(user_name)
+    temps = dict(u.get("temperatures") or {})
+    temps[movie_id] = clamp_temperature(temperature)
+    u["temperatures"] = temps
+    normalized = normalize_prefs(u)
+    with _user_lock:
+        user_behavior[user_name] = normalized
+    persist_user_prefs(user_name)
+    return normalized
 
 
 def movie_to_sheets_card(m, score=None, match_reasons=None):
@@ -661,6 +682,177 @@ def push_feed_get(user_name):
     return doc
 
 
+def rooms_read_all():
+    try:
+        encoded = urllib.parse.quote(f"{ROOMS_SHEET}!A:B")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        out = {}
+        for row in rows:
+            if len(row) < 2:
+                continue
+            code = normalize_room_code(row[0])
+            if not code or code.lower() == "code":
+                continue
+            try:
+                doc = normalize_room(json.loads(row[1]))
+                doc["code"] = code
+                out[code] = doc
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        print(f"  rooms_read_all 錯誤: {e}")
+        return {}
+
+
+def rooms_find_row(code):
+    code = normalize_room_code(code)
+    if not code:
+        return None
+    try:
+        encoded = urllib.parse.quote(f"{ROOMS_SHEET}!A:A")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        for i, row in enumerate(rows):
+            if row and normalize_room_code(row[0]) == code:
+                return i + 1
+    except Exception as e:
+        print(f"  rooms_find_row 錯誤: {e}")
+    return None
+
+
+def rooms_save_one(room_doc):
+    ensure_sheet()
+    doc = normalize_room(room_doc)
+    code = doc["code"]
+    if not code:
+        raise ValueError("缺少房間代碼")
+    payload = json.dumps(doc, ensure_ascii=False)
+    row_num = rooms_find_row(code)
+    if row_num:
+        encoded = urllib.parse.quote(f"{ROOMS_SHEET}!B{row_num}")
+        sheets_request(
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
+            {"values": [[payload]]},
+        )
+    else:
+        existing = rooms_read_all()
+        if code in existing:
+            raise ValueError(f"房間代碼 {code} 已存在")
+        encoded = urllib.parse.quote(f"{ROOMS_SHEET}!A:B")
+        sheets_request(
+            "POST",
+            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            {"values": [[code, payload]]},
+        )
+    with _rooms_lock:
+        _rooms_cache[code] = doc
+    return doc
+
+
+def load_rooms_from_sheets():
+    global _rooms_cache
+    loaded = rooms_read_all()
+    with _rooms_lock:
+        _rooms_cache = loaded
+    print(f"  已載入 {len(loaded)} 個多人房間（{ROOMS_SHEET}）")
+
+
+def room_get(code):
+    code = normalize_room_code(code)
+    if not code:
+        return None
+    with _rooms_lock:
+        cached = _rooms_cache.get(code)
+    if cached:
+        return cached
+    all_rooms = rooms_read_all()
+    doc = all_rooms.get(code)
+    if doc:
+        with _rooms_lock:
+            _rooms_cache[code] = doc
+    return doc
+
+
+def room_create(room_name="", message="", created_by=""):
+    existing = rooms_read_all()
+    doc = build_new_room(set(existing.keys()), room_name=room_name, message=message, created_by=created_by)
+    return rooms_save_one(doc)
+
+
+def room_join(code, user_name):
+    code = normalize_room_code(code)
+    user_name = (user_name or "").strip()
+    if not code:
+        return None, "缺少 roomCode"
+    if not user_name:
+        return None, "缺少 userName"
+    doc = room_get(code)
+    if not doc:
+        return None, "房間不存在"
+    if doc.get("status") == "closed":
+        return None, "房間已關閉"
+    updated = room_add_member(doc, user_name)
+    saved = rooms_save_one(updated)
+    return saved, None
+
+
+def room_close(code):
+    code = normalize_room_code(code)
+    doc = room_get(code)
+    if not doc:
+        return None, "房間不存在"
+    doc["status"] = "closed"
+    return rooms_save_one(doc), None
+
+
+def room_publish_all_members(code, limit=20, message=""):
+    code = normalize_room_code(code)
+    doc = room_get(code)
+    if not doc:
+        return None, "房間不存在"
+    if doc.get("status") == "closed":
+        return None, "房間已關閉"
+    members = doc.get("members") or []
+    if not members:
+        return None, "房間尚無成員"
+    msg = (message or doc.get("message") or "").strip()
+    results = []
+    for name in members:
+        prefs = get_user_prefs(name)
+        if not (prefs.get("like") or prefs.get("temperatures")):
+            results.append({
+                "userName": name,
+                "ok": False,
+                "skipped": True,
+                "error": "尚無喜好記錄",
+            })
+            continue
+        try:
+            pub = admin_publish_push(name, limit=limit, message=msg)
+            results.append({
+                "userName": name,
+                "ok": True,
+                "cardCount": pub.get("cardCount", 0),
+                "publishedAt": pub.get("publishedAt"),
+            })
+        except Exception as e:
+            results.append({"userName": name, "ok": False, "error": str(e)})
+    doc["lastPushAt"] = utc_now()
+    if msg:
+        doc["message"] = msg
+    rooms_save_one(doc)
+    ok_n = sum(1 for r in results if r.get("ok"))
+    return {
+        "ok": True,
+        "roomCode": code,
+        "published": ok_n,
+        "total": len(results),
+        "results": results,
+        "lastPushAt": doc["lastPushAt"],
+    }, None
+
+
 def admin_build_push_payload(user_name, limit=20, message=""):
     movies = db_read()
     u = get_user_prefs(user_name)
@@ -762,6 +954,8 @@ def admin_push_dashboard():
         "feedSheet": PUSH_FEED_SHEET,
         "prefsSheet": USER_PREFS_SHEET,
         "eventsSheet": USER_EVENTS_SHEET,
+        "roomsSheet": ROOMS_SHEET,
+        "rooms": rooms_overview(rooms_read_all()),
     }
 
 
@@ -832,6 +1026,12 @@ def handle_sync_push(body):
     events = body.get("events") or []
     if events:
         user_events_append(user_name, events, device_id)
+    room_code = normalize_room_code(body.get("roomCode") or body.get("room") or "")
+    room_doc = None
+    if room_code:
+        room_doc, room_err = room_join(room_code, user_name)
+        if room_err:
+            return 400, {"ok": False, "error": room_err}
     auto_publish = bool(body.get("autoPublishRecommend"))
     limit = int(body.get("limit") or 20)
     message = (body.get("message") or "").strip()
@@ -842,6 +1042,8 @@ def handle_sync_push(body):
     movies = db_read()
     payload = build_sync_pull_payload(user_name, merged, feed, movies)
     payload["merged"] = True
+    if room_doc:
+        payload["room"] = room_public_view(room_doc)
     if published:
         payload["published"] = True
         payload["pushFeed"] = published
@@ -1073,7 +1275,7 @@ def normalize_analysis_result(result):
 
 
 def normalize_movie_record(record):
-    """統一 year 欄位（四位數字），可從 publishedAt 推斷。"""
+    """統一 year 欄位（四位數字），可從 publishedAt 推斷；儲存前優先補 TMDB 海報。"""
     normalize_emotion_fields(record)
     y = str(record.get("year") or "").strip()
     if re.fullmatch(r"\d{4}", y):
@@ -1084,6 +1286,7 @@ def normalize_movie_record(record):
         m = re.match(r"^(\d{4})", pub)
         if m:
             record["year"] = m.group(1)
+    enrich_movie_poster(record)
     return record
 
 
@@ -1112,6 +1315,8 @@ def fetch_tmdb_poster_by_id(tmdb_id, media_type="movie"):
     try:
         data = tmdb_request(f"/{media_type}/{tmdb_id}")
         path = data.get("poster_path") or ""
+        if not path:
+            path = data.get("backdrop_path") or ""
         url = f"https://image.tmdb.org/t/p/w500{path}" if path else ""
         _tmdb_poster_cache[key] = url
         return url
@@ -1119,6 +1324,83 @@ def fetch_tmdb_poster_by_id(tmdb_id, media_type="movie"):
         print(f"  fetch_tmdb_poster_by_id 錯誤: {e}")
         _tmdb_poster_cache[key] = ""
         return ""
+
+
+def search_tmdb_poster_by_title(title, year=""):
+    """Search TMDB by title/year; return dict with poster URL or None."""
+    query = clean_movie_title(title) or (title or "").strip()
+    if not query or not TMDB_API_KEY:
+        return None
+    year_s = str(year or "").strip()
+    for media_type in ("movie", "tv"):
+        params = {"query": query}
+        if year_s.isdigit() and len(year_s) == 4 and media_type == "movie":
+            params["year"] = year_s
+        try:
+            data = tmdb_request(f"/search/{media_type}", params)
+        except Exception as e:
+            print(f"  search_tmdb_poster_by_title 錯誤: {e}")
+            continue
+        results = data.get("results") or []
+        if year_s.isdigit() and len(year_s) == 4:
+            for hit in results:
+                date = (hit.get("release_date") or hit.get("first_air_date") or "")
+                if date.startswith(year_s) and hit.get("poster_path"):
+                    path = hit["poster_path"]
+                    return {
+                        "tmdbId": hit["id"],
+                        "mediaType": media_type,
+                        "poster": f"https://image.tmdb.org/t/p/w500{path}",
+                    }
+        for hit in results:
+            path = hit.get("poster_path") or ""
+            if path:
+                return {
+                    "tmdbId": hit["id"],
+                    "mediaType": media_type,
+                    "poster": f"https://image.tmdb.org/t/p/w500{path}",
+                }
+    return None
+
+
+def enrich_movie_poster(record):
+    """On save: prefer TMDB poster; YouTube thumbnail only as fallback."""
+    if not isinstance(record, dict):
+        return record
+
+    poster = (record.get("poster") or "").strip()
+    thumb = (record.get("thumb") or "").strip()
+    if "image.tmdb.org" in poster or "image.tmdb.org" in thumb:
+        url = poster if "image.tmdb.org" in poster else thumb
+        record["poster"] = record["thumb"] = url
+        return record
+
+    media_type, parsed_id = parse_tmdb_from_yt_id(record.get("ytId"))
+    tmdb_id = record.get("tmdbId") or parsed_id
+    media_type = record.get("mediaType") or media_type or "movie"
+    url = ""
+
+    if tmdb_id:
+        url = fetch_tmdb_poster_by_id(tmdb_id, media_type)
+
+    if not url:
+        hit = search_tmdb_poster_by_title(record.get("title") or "", record.get("year") or "")
+        if hit:
+            url = hit["poster"]
+            record["tmdbId"] = hit["tmdbId"]
+            record["mediaType"] = hit["mediaType"]
+
+    if url:
+        record["poster"] = url
+        record["thumb"] = url
+        return record
+
+    yt_id = record.get("ytId") or ""
+    if is_youtube_video_id(yt_id):
+        yp = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
+        record["poster"] = yp
+        record["thumb"] = yp
+    return record
 
 
 def parse_tmdb_from_yt_id(yt_id):
@@ -1129,6 +1411,15 @@ def parse_tmdb_from_yt_id(yt_id):
 
 
 def resolve_movie_poster(movie):
+    """Resolve display poster: TMDB first, then stored TMDB, then YouTube."""
+    media_type, parsed_id = parse_tmdb_from_yt_id(movie.get("ytId"))
+    tmdb_id = movie.get("tmdbId") or parsed_id
+    media_type = movie.get("mediaType") or media_type or "movie"
+    if tmdb_id:
+        url = fetch_tmdb_poster_by_id(tmdb_id, media_type)
+        if url:
+            return url
+
     for field in (movie.get("poster"), movie.get("thumb")):
         poster = (field or "").strip()
         if not poster or "img.youtube.com/vi/tmdb-" in poster:
@@ -1140,14 +1431,6 @@ def resolve_movie_poster(movie):
                 return poster
             if "img.youtube.com" not in poster:
                 return poster
-
-    media_type, parsed_id = parse_tmdb_from_yt_id(movie.get("ytId"))
-    tmdb_id = movie.get("tmdbId") or parsed_id
-    media_type = movie.get("mediaType") or media_type or "movie"
-    if tmdb_id:
-        url = fetch_tmdb_poster_by_id(tmdb_id, media_type)
-        if url:
-            return url
 
     yt_id = movie.get("ytId") or ""
     if is_youtube_video_id(yt_id):
@@ -1609,6 +1892,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(200, {"ok": True, "hasFeed": True, **feed})
 
+        elif path == "/api/room/list":
+            try:
+                rooms = rooms_overview(rooms_read_all())
+                self.send_json(200, {"ok": True, "rooms": rooms, "count": len(rooms), "roomsSheet": ROOMS_SHEET})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+
+        elif path == "/api/room":
+            qs = parse_query_string(self.path)
+            code = normalize_room_code(qs.get("code") or qs.get("roomCode") or "")
+            if not code:
+                self.send_json(400, {"ok": False, "error": "缺少 code"})
+                return
+            doc = room_get(code)
+            if not doc:
+                self.send_json(404, {"ok": False, "error": "房間不存在"})
+                return
+            self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
 
@@ -1624,7 +1926,17 @@ class Handler(BaseHTTPRequestHandler):
             masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
             self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
         elif path == "/api/search/synonyms":
-            groups = get_search_synonym_groups()
+            qs = parse_query_string(self.path)
+            if qs.get("defaults") in ("1", "true", "yes"):
+                from search_synonyms import DEFAULT_SEARCH_SYNONYM_GROUPS
+                groups = normalize_synonym_groups(DEFAULT_SEARCH_SYNONYM_GROUPS)
+                self.send_json(200, {"ok": True, "groups": groups, "count": len(groups)})
+            else:
+                groups = get_search_synonym_groups()
+                self.send_json(200, {"ok": True, "groups": groups, "count": len(groups)})
+        elif path in ("/api/search/synonyms/defaults", "/synonyms_defaults.json"):
+            from search_synonyms import DEFAULT_SEARCH_SYNONYM_GROUPS
+            groups = normalize_synonym_groups(DEFAULT_SEARCH_SYNONYM_GROUPS)
             self.send_json(200, {"ok": True, "groups": groups, "count": len(groups)})
         elif path in ["/", "/index.html"]:
             if os.path.exists("index.html"):
@@ -1663,6 +1975,48 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(code, payload)
             return
 
+        # ========== 多人房間 ==========
+        if path == "/api/room/create":
+            try:
+                room_name = (body.get("roomName") or body.get("name") or "").strip()
+                message = (body.get("message") or "").strip()
+                created_by = (body.get("createdBy") or body.get("userName") or "").strip()
+                doc = room_create(room_name=room_name, message=message, created_by=created_by)
+                self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/api/room/join":
+            code = normalize_room_code(body.get("roomCode") or body.get("code") or body.get("room") or "")
+            user_name = (body.get("userName") or "").strip()
+            doc, err = room_join(code, user_name)
+            if err:
+                self.send_json(404 if err == "房間不存在" else 400, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+            return
+
+        if path == "/api/room/publish":
+            code = normalize_room_code(body.get("roomCode") or body.get("code") or "")
+            limit = int(body.get("limit") or 20)
+            message = (body.get("message") or "").strip()
+            result, err = room_publish_all_members(code, limit=limit, message=message)
+            if err:
+                self.send_json(404 if "不存在" in err else 400, {"ok": False, "error": err})
+                return
+            self.send_json(200, result)
+            return
+
+        if path == "/api/room/close":
+            code = normalize_room_code(body.get("roomCode") or body.get("code") or "")
+            doc, err = room_close(code)
+            if err:
+                self.send_json(404, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+            return
+
         # ========== 後台：同步過期推薦 ==========
         if path == "/api/admin/multi/republish_stale":
             limit = int(body.get("limit") or 20)
@@ -1673,21 +2027,36 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(500, {"ok": False, "error": str(e)})
             return
 
-        # ========== APP 喜歡 ==========
+        # ========== APP 溫度計評分 ==========
+        if path == "/api/user/rate":
+            userName = (body.get("userName") or "").strip()
+            movieId = (body.get("movieId") or "").strip()
+            if not userName or not movieId:
+                self.send_json(400, {"ok": False, "error": "缺少 userName 或 movieId"})
+                return
+            if "temperature" not in body and "temp" not in body:
+                self.send_json(400, {"ok": False, "error": "缺少 temperature（0–100）"})
+                return
+            temp = clamp_temperature(body.get("temperature", body.get("temp")))
+            u = set_user_temperature(userName, movieId, temp)
+            user_events_append(
+                userName,
+                [{"type": "rate", "movieId": movieId, "temperature": temp}],
+                body.get("deviceId", ""),
+            )
+            self.send_json(200, {"ok": True, "user": u, "temperature": temp})
+            return
+
+        # ========== APP 喜歡（相容 → 85°） ==========
         if path == "/api/user/like":
             userName = (body.get("userName") or "").strip()
             movieId = (body.get("movieId") or "").strip()
             if not userName or not movieId:
                 self.send_json(400, {"ok": False, "error": "缺少 userName 或 movieId"})
                 return
-            u = get_user_prefs(userName)
-            if movieId not in u["like"]:
-                u["like"].append(movieId)
-            if movieId in u["dislike"]:
-                u["dislike"].remove(movieId)
-            persist_user_prefs(userName)
+            u = set_user_temperature(userName, movieId, TEMP_LIKE)
             user_events_append(userName, [{"type": "like", "movieId": movieId}], body.get("deviceId", ""))
-            self.send_json(200, {"ok": True, "user": u})
+            self.send_json(200, {"ok": True, "user": u, "temperature": TEMP_LIKE})
             return
 
         # ========== APP 取得使用者 ==========
@@ -1712,14 +2081,9 @@ class Handler(BaseHTTPRequestHandler):
             if not userName or not movieId:
                 self.send_json(400, {"ok": False, "error": "缺少 userName 或 movieId"})
                 return
-            u = get_user_prefs(userName)
-            if movieId not in u["dislike"]:
-                u["dislike"].append(movieId)
-            if movieId in u["like"]:
-                u["like"].remove(movieId)
-            persist_user_prefs(userName)
+            u = set_user_temperature(userName, movieId, TEMP_DISLIKE)
             user_events_append(userName, [{"type": "dislike", "movieId": movieId}], body.get("deviceId", ""))
-            self.send_json(200, {"ok": True, "user": u})
+            self.send_json(200, {"ok": True, "user": u, "temperature": TEMP_DISLIKE})
             return
 
         # ========== 喜好分析（後台／展覽用） ==========
@@ -1893,7 +2257,7 @@ class Handler(BaseHTTPRequestHandler):
         new_keys = []
         for key in incoming:
             key = str(key).strip()
-            if is_valid_gemini_api_key(key) and key not in new_keys:
+            if key.startswith("AIza") and key not in new_keys:
                 new_keys.append(key)
 
         if not new_keys:
@@ -2167,6 +2531,7 @@ def main():
     ensure_sheet()
     load_user_behavior_from_sheets()
     load_push_feed_from_sheets()
+    load_rooms_from_sheets()
     server = ThreadedServer(("0.0.0.0", PORT), Handler)
     print(f"Server running on 0.0.0.0:{PORT}")
     server.serve_forever()

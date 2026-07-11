@@ -7,7 +7,15 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from recommend_engine import global_user_stats, summarize_profile
+from recommend_engine import (
+    TEMP_DISLIKE,
+    TEMP_LIKE,
+    clamp_temperature,
+    global_user_stats,
+    summarize_profile,
+    sync_like_dislike_from_temperatures,
+    temperature_map_from_prefs,
+)
 
 
 def utc_now() -> str:
@@ -16,12 +24,13 @@ def utc_now() -> str:
 
 def normalize_prefs(data: dict | None) -> dict[str, Any]:
     if not data:
-        return {"like": [], "dislike": []}
-    like = list(dict.fromkeys(data.get("like") or []))
-    dislike = [x for x in dict.fromkeys(data.get("dislike") or []) if x not in like]
+        data = {}
+    temps = temperature_map_from_prefs(data)
+    like, dislike = sync_like_dislike_from_temperatures(temps)
     return {
         "like": like,
         "dislike": dislike,
+        "temperatures": {k: round(v, 1) for k, v in temps.items()},
         "updatedAt": data.get("updatedAt"),
         "lastSyncAt": data.get("lastSyncAt"),
         "deviceId": (data.get("deviceId") or "").strip(),
@@ -29,15 +38,26 @@ def normalize_prefs(data: dict | None) -> dict[str, Any]:
 
 
 def merge_client_prefs(server_prefs: dict, client_body: dict) -> dict[str, Any]:
-    """Merge APP upload (full lists and/or incremental events)."""
+    """Merge APP upload (full lists, temperature map, and/or incremental events)."""
     merged = normalize_prefs(server_prefs)
-    like = list(merged["like"])
-    dislike = list(merged["dislike"])
+    temps = dict(merged.get("temperatures") or {})
+
+    if isinstance(client_body.get("temperatures"), dict):
+        for mid, val in client_body["temperatures"].items():
+            mid_s = str(mid).strip()
+            if mid_s:
+                temps[mid_s] = clamp_temperature(val)
 
     if client_body.get("like") is not None:
-        like = list(dict.fromkeys(client_body.get("like") or []))
+        for mid in client_body.get("like") or []:
+            mid_s = str(mid).strip()
+            if mid_s:
+                temps[mid_s] = float(TEMP_LIKE)
     if client_body.get("dislike") is not None:
-        dislike = list(dict.fromkeys(client_body.get("dislike") or []))
+        for mid in client_body.get("dislike") or []:
+            mid_s = str(mid).strip()
+            if mid_s:
+                temps[mid_s] = float(TEMP_DISLIKE)
 
     for ev in client_body.get("events") or []:
         if not isinstance(ev, dict):
@@ -46,22 +66,21 @@ def merge_client_prefs(server_prefs: dict, client_body: dict) -> dict[str, Any]:
         if not mid:
             continue
         action = (ev.get("type") or ev.get("action") or "").lower()
-        if action == "like":
-            if mid not in like:
-                like.append(mid)
-            if mid in dislike:
-                dislike.remove(mid)
+        if action in ("rate", "temperature", "temp"):
+            temps[mid] = clamp_temperature(
+                ev.get("temperature", ev.get("temp", TEMP_LIKE))
+            )
+        elif action == "like":
+            temps[mid] = float(TEMP_LIKE)
         elif action == "dislike":
-            if mid not in dislike:
-                dislike.append(mid)
-            if mid in like:
-                like.remove(mid)
+            temps[mid] = float(TEMP_DISLIKE)
 
-    dislike = [x for x in dislike if x not in like]
+    like, dislike = sync_like_dislike_from_temperatures(temps)
     now = utc_now()
     return {
         "like": like,
         "dislike": dislike,
+        "temperatures": {k: round(v, 1) for k, v in temps.items()},
         "updatedAt": (client_body.get("clientUpdatedAt") or "").strip() or now,
         "lastSyncAt": now,
         "deviceId": (client_body.get("deviceId") or merged.get("deviceId") or "").strip(),
@@ -70,15 +89,17 @@ def merge_client_prefs(server_prefs: dict, client_body: dict) -> dict[str, Any]:
 
 def push_is_stale(prefs: dict, feed: dict | None) -> bool:
     """True when user prefs changed after last published push feed."""
-    if not (prefs.get("like") or prefs.get("dislike")):
+    temps = temperature_map_from_prefs(prefs)
+    if not temps:
         return False
+    warm = any(t > 50 for t in temps.values())
     if not feed or not feed.get("publishedAt"):
-        return bool(prefs.get("like"))
+        return warm
     updated = prefs.get("updatedAt") or ""
     published = feed.get("publishedAt") or ""
     if updated and published:
         return updated > published
-    return bool(prefs.get("like")) and not feed.get("cards")
+    return warm and not feed.get("cards")
 
 
 def build_sync_pull_payload(
@@ -92,13 +113,14 @@ def build_sync_pull_payload(
     live_meta: dict | None = None,
 ) -> dict[str, Any]:
     movies_by_id = {m["id"]: m for m in movies if m.get("id")}
-    profile = summarize_profile(movies_by_id, prefs)
-    stale = push_is_stale(prefs, feed)
+    normalized = normalize_prefs(prefs)
+    profile = summarize_profile(movies_by_id, normalized)
+    stale = push_is_stale(normalized, feed)
     out: dict[str, Any] = {
         "ok": True,
         "userName": user_name,
         "serverTime": utc_now(),
-        "prefs": normalize_prefs(prefs),
+        "prefs": normalized,
         "profile": profile,
         "pushFeed": feed if feed and feed.get("cards") else None,
         "pushStale": stale,
@@ -125,10 +147,15 @@ def multi_user_overview(
         stale = push_is_stale(prefs, feed)
         if stale:
             stale_count += 1
+        temps = prefs.get("temperatures") or {}
         users.append({
             "userName": user_name,
             "likeCount": len(prefs["like"]),
             "dislikeCount": len(prefs["dislike"]),
+            "ratedCount": len(temps),
+            "avgTemperature": (
+                round(sum(temps.values()) / len(temps), 1) if temps else None
+            ),
             "updatedAt": prefs.get("updatedAt"),
             "lastSyncAt": prefs.get("lastSyncAt"),
             "deviceId": prefs.get("deviceId"),

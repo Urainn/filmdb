@@ -1,5 +1,5 @@
 """
-Content-based recommendation from like/dislike movie tag profiles.
+Content-based recommendation from thermometer-weighted movie tag profiles.
 Used by server.py for /api/sheets_card/recommend and /api/user/analyze.
 """
 
@@ -18,6 +18,55 @@ DEFAULT_WEIGHTS = {
     "dislike_atmosphere": 3,
     "dislike_scene": 2,
 }
+
+# 溫度計：0=冷（不喜歡）… 50=中性 … 100=熱（喜歡）
+TEMP_NEUTRAL = 50
+TEMP_LIKE = 85
+TEMP_DISLIKE = 15
+TEMP_HOT = 67
+TEMP_COLD = 33
+TEMP_BLOCK = 20
+
+
+def clamp_temperature(value) -> float:
+    try:
+        return max(0.0, min(100.0, float(value)))
+    except (TypeError, ValueError):
+        return float(TEMP_NEUTRAL)
+
+
+def warm_cold_weights(temperature: float) -> tuple[float, float]:
+    """Return (warm_weight, cold_weight) each in 0..1 from thermometer reading."""
+    t = clamp_temperature(temperature)
+    warm = max(0.0, (t - TEMP_NEUTRAL) / 50.0)
+    cold = max(0.0, (TEMP_NEUTRAL - t) / 50.0)
+    return warm, cold
+
+
+def temperature_map_from_prefs(user_prefs: dict) -> dict[str, float]:
+    """Build movieId -> temperature; migrate legacy like/dislike lists."""
+    temps: dict[str, float] = {}
+    raw = user_prefs.get("temperatures") or {}
+    if isinstance(raw, dict):
+        for mid, val in raw.items():
+            mid_s = str(mid).strip()
+            if mid_s:
+                temps[mid_s] = clamp_temperature(val)
+    for mid in user_prefs.get("like") or []:
+        mid_s = str(mid).strip()
+        if mid_s and mid_s not in temps:
+            temps[mid_s] = float(TEMP_LIKE)
+    for mid in user_prefs.get("dislike") or []:
+        mid_s = str(mid).strip()
+        if mid_s and mid_s not in temps:
+            temps[mid_s] = float(TEMP_DISLIKE)
+    return temps
+
+
+def sync_like_dislike_from_temperatures(temps: dict[str, float]) -> tuple[list[str], list[str]]:
+    like = [mid for mid, t in temps.items() if t >= TEMP_HOT]
+    dislike = [mid for mid, t in temps.items() if t <= TEMP_COLD and mid not in like]
+    return like, dislike
 
 
 def _tag_list(value) -> list[str]:
@@ -69,50 +118,110 @@ def build_tag_profile(
     return profile
 
 
+def build_temperature_profiles(
+    movies_by_id: dict[str, dict],
+    temp_map: dict[str, float],
+) -> tuple[dict[str, Counter], dict[str, Counter]]:
+    """Warm profile from hot ratings; cold profile from cold ratings."""
+    warm = {
+        "genres": Counter(),
+        "emotions": Counter(),
+        "atmospheres": Counter(),
+        "scenes": Counter(),
+    }
+    cold = {
+        "genres": Counter(),
+        "emotions": Counter(),
+        "atmospheres": Counter(),
+        "scenes": Counter(),
+    }
+    for mid, temp in temp_map.items():
+        movie = movies_by_id.get(mid)
+        if not movie:
+            continue
+        warm_w, cold_w = warm_cold_weights(temp)
+        tags = _movie_tags(movie)
+        if warm_w > 0:
+            for key in warm:
+                for tag in tags[key]:
+                    warm[key][tag] += warm_w
+        if cold_w > 0:
+            for key in cold:
+                for tag in tags[key]:
+                    cold[key][tag] += cold_w
+    return warm, cold
+
+
 def _top_items(counter: Counter, n: int = 8) -> list[dict[str, Any]]:
-    return [{"tag": tag, "weight": int(w)} for tag, w in counter.most_common(n)]
+    return [{"tag": tag, "weight": round(float(w), 2)} for tag, w in counter.most_common(n)]
 
 
 def summarize_profile(movies_by_id: dict[str, dict], user_prefs: dict) -> dict:
-    like_ids = user_prefs.get("like") or []
-    dislike_ids = user_prefs.get("dislike") or []
-    like_prof = build_tag_profile(movies_by_id, like_ids, 1.0)
-    dislike_prof = build_tag_profile(movies_by_id, dislike_ids, 1.0)
-    liked_titles = [
-        movies_by_id[mid].get("title", mid)
-        for mid in like_ids
-        if mid in movies_by_id
-    ]
-    disliked_titles = [
-        movies_by_id[mid].get("title", mid)
-        for mid in dislike_ids
-        if mid in movies_by_id
-    ]
+    temp_map = temperature_map_from_prefs(user_prefs)
+    warm_prof, cold_prof = build_temperature_profiles(movies_by_id, temp_map)
+
+    rated_entries = []
+    for mid, temp in temp_map.items():
+        if mid not in movies_by_id:
+            continue
+        rated_entries.append({
+            "movieId": mid,
+            "title": movies_by_id[mid].get("title", mid),
+            "temperature": round(temp, 1),
+        })
+    rated_entries.sort(key=lambda x: -x["temperature"])
+
+    hot = [e for e in rated_entries if e["temperature"] >= TEMP_HOT]
+    cold = [e for e in rated_entries if e["temperature"] <= TEMP_COLD]
+    avg_temp = (
+        round(sum(e["temperature"] for e in rated_entries) / len(rated_entries), 1)
+        if rated_entries
+        else None
+    )
+
+    like_ids, dislike_ids = sync_like_dislike_from_temperatures(temp_map)
+
     return {
+        "ratedCount": len(rated_entries),
+        "avgTemperature": avg_temp,
+        "hotCount": len(hot),
+        "coldCount": len(cold),
+        "neutralCount": len(rated_entries) - len(hot) - len(cold),
+        "topRated": rated_entries[:12],
+        "bottomRated": list(reversed(rated_entries))[:8],
         "likeCount": len(like_ids),
         "dislikeCount": len(dislike_ids),
-        "likedTitles": liked_titles[:20],
-        "dislikedTitles": disliked_titles[:20],
-        "topGenres": _top_items(like_prof["genres"]),
-        "topEmotions": _top_items(like_prof["emotions"]),
-        "topAtmospheres": _top_items(like_prof["atmospheres"]),
-        "topMoods": _top_items(like_prof["emotions"] + like_prof["atmospheres"]),
-        "topScenes": _top_items(like_prof["scenes"]),
-        "avoidGenres": _top_items(dislike_prof["genres"], 5),
+        "likedTitles": [e["title"] for e in hot[:20]],
+        "dislikedTitles": [e["title"] for e in cold[:20]],
+        "topGenres": _top_items(warm_prof["genres"]),
+        "topEmotions": _top_items(warm_prof["emotions"]),
+        "topAtmospheres": _top_items(warm_prof["atmospheres"]),
+        "topMoods": _top_items(warm_prof["emotions"] + warm_prof["atmospheres"]),
+        "topScenes": _top_items(warm_prof["scenes"]),
+        "avoidGenres": _top_items(cold_prof["genres"], 5),
+        "temperatureScale": {
+            "min": 0,
+            "neutral": TEMP_NEUTRAL,
+            "max": 100,
+            "hotThreshold": TEMP_HOT,
+            "coldThreshold": TEMP_COLD,
+        },
     }
 
 
 def score_movie(
     movie: dict,
-    like_profile: dict[str, Counter],
-    dislike_profile: dict[str, Counter],
+    warm_profile: dict[str, Counter],
+    cold_profile: dict[str, Counter],
     user_prefs: dict,
     weights: dict | None = None,
 ) -> tuple[float, list[str]]:
     weights = weights or DEFAULT_WEIGHTS
     mid = movie.get("id", "")
-    if mid in (user_prefs.get("dislike") or []):
-        return -1000.0, ["已標記不喜歡"]
+    temp_map = temperature_map_from_prefs(user_prefs)
+    if mid in temp_map:
+        t = temp_map[mid]
+        return -1000.0, [f"已評分（{int(t)}°）"]
 
     tags = _movie_tags(movie)
     score = 0.0
@@ -127,40 +236,40 @@ def score_movie(
         reasons.append(f"{prefix}「{tag}」")
 
     for g in tags["genres"]:
-        w = like_profile["genres"].get(g, 0) * weights["like_genre"]
+        w = warm_profile["genres"].get(g, 0) * weights["like_genre"]
         if w:
             score += w
             add_reason("類型", g, w)
     for e in tags["emotions"]:
-        w = like_profile["emotions"].get(e, 0) * weights["like_emotion"]
+        w = warm_profile["emotions"].get(e, 0) * weights["like_emotion"]
         if w:
             score += w
             add_reason("情緒", e, w)
     for a in tags["atmospheres"]:
-        w = like_profile["atmospheres"].get(a, 0) * weights["like_atmosphere"]
+        w = warm_profile["atmospheres"].get(a, 0) * weights["like_atmosphere"]
         if w:
             score += w
             add_reason("氛圍", a, w)
     for s in tags["scenes"]:
-        w = like_profile["scenes"].get(s, 0) * weights["like_scene"]
+        w = warm_profile["scenes"].get(s, 0) * weights["like_scene"]
         if w:
             score += w
             add_reason("場景", s, w)
 
     for g in tags["genres"]:
-        w = dislike_profile["genres"].get(g, 0) * weights["dislike_genre"]
+        w = cold_profile["genres"].get(g, 0) * weights["dislike_genre"]
         if w:
             score -= w
     for e in tags["emotions"]:
-        w = dislike_profile["emotions"].get(e, 0) * weights["dislike_emotion"]
+        w = cold_profile["emotions"].get(e, 0) * weights["dislike_emotion"]
         if w:
             score -= w
     for a in tags["atmospheres"]:
-        w = dislike_profile["atmospheres"].get(a, 0) * weights["dislike_atmosphere"]
+        w = cold_profile["atmospheres"].get(a, 0) * weights["dislike_atmosphere"]
         if w:
             score -= w
     for s in tags["scenes"]:
-        w = dislike_profile["scenes"].get(s, 0) * weights["dislike_scene"]
+        w = cold_profile["scenes"].get(s, 0) * weights["dislike_scene"]
         if w:
             score -= w
 
@@ -175,26 +284,26 @@ def ranked_movies(
 ) -> tuple[list[tuple[float, dict, list[str]]], dict]:
     """Return scored candidates and metadata (cold start, profile summary)."""
     movies_by_id = {m["id"]: m for m in movies if m.get("id")}
-    like_ids = user_prefs.get("like") or []
-    dislike_ids = user_prefs.get("dislike") or []
+    temp_map = temperature_map_from_prefs(user_prefs)
+    warm_ids = [mid for mid, t in temp_map.items() if t > TEMP_NEUTRAL]
     meta: dict[str, Any] = {
-        "coldStart": not like_ids,
+        "coldStart": not warm_ids,
         "profile": summarize_profile(movies_by_id, user_prefs),
     }
 
-    if not like_ids:
-        pool = [m for m in movies if m.get("id") not in dislike_ids]
+    if not warm_ids:
+        rated = set(temp_map.keys())
+        pool = [m for m in movies if m.get("id") not in rated]
         return [(0.0, m, []) for m in pool[:limit]], meta
 
-    like_prof = build_tag_profile(movies_by_id, like_ids, 1.0)
-    dislike_prof = build_tag_profile(movies_by_id, dislike_ids, 1.0)
+    warm_prof, cold_prof = build_temperature_profiles(movies_by_id, temp_map)
     scored: list[tuple[float, dict, list[str]]] = []
 
     for movie in movies:
         mid = movie.get("id")
-        if not mid or mid in like_ids or mid in dislike_ids:
+        if not mid or mid in temp_map:
             continue
-        s, reasons = score_movie(movie, like_prof, dislike_prof, user_prefs, weights)
+        s, reasons = score_movie(movie, warm_prof, cold_prof, user_prefs, weights)
         if s > 0:
             scored.append((s, movie, reasons))
 
@@ -207,25 +316,62 @@ def global_user_stats(all_users: dict[str, dict], movies: list[dict]) -> dict:
     movies_by_id = {m["id"]: m for m in movies if m.get("id")}
     total_likes = 0
     total_dislikes = 0
+    total_rated = 0
+    total_hot = 0
+    total_cold = 0
+    temp_sum = 0.0
     genre_counter: Counter = Counter()
 
     for prefs in all_users.values():
-        total_likes += len(prefs.get("like") or [])
-        total_dislikes += len(prefs.get("dislike") or [])
-        prof = build_tag_profile(movies_by_id, prefs.get("like") or [], 1.0)
-        genre_counter.update(prof["genres"])
+        temp_map = temperature_map_from_prefs(prefs)
+        like_ids, dislike_ids = sync_like_dislike_from_temperatures(temp_map)
+        total_likes += len(like_ids)
+        total_dislikes += len(dislike_ids)
+        total_rated += len(temp_map)
+        temp_sum += sum(temp_map.values())
+        total_hot += sum(1 for t in temp_map.values() if t >= TEMP_HOT)
+        total_cold += sum(1 for t in temp_map.values() if t <= TEMP_COLD)
+        warm_prof, _ = build_temperature_profiles(movies_by_id, temp_map)
+        genre_counter.update(warm_prof["genres"])
 
     return {
         "userCount": len(all_users),
         "totalLikes": total_likes,
         "totalDislikes": total_dislikes,
+        "totalRated": total_rated,
+        "totalHot": total_hot,
+        "totalCold": total_cold,
+        "totalNeutral": max(0, total_rated - total_hot - total_cold),
+        "avgTemperature": round(temp_sum / total_rated, 1) if total_rated else None,
+        "temperatureDistribution": {
+            "cold": total_cold,
+            "neutral": max(0, total_rated - total_hot - total_cold),
+            "hot": total_hot,
+        },
         "topGenresAcrossUsers": _top_items(genre_counter, 12),
         "users": [
             {
                 "userName": name,
-                "likeCount": len(p.get("like") or []),
-                "dislikeCount": len(p.get("dislike") or []),
+                **(_user_stat_row(p)),
             }
             for name, p in sorted(all_users.items())
         ],
+    }
+
+
+def _user_stat_row(prefs: dict) -> dict[str, Any]:
+    temp_map = temperature_map_from_prefs(prefs)
+    like_ids, dislike_ids = sync_like_dislike_from_temperatures(temp_map)
+    hot = sum(1 for t in temp_map.values() if t >= TEMP_HOT)
+    cold = sum(1 for t in temp_map.values() if t <= TEMP_COLD)
+    return {
+        "likeCount": len(like_ids),
+        "dislikeCount": len(dislike_ids),
+        "ratedCount": len(temp_map),
+        "hotCount": hot,
+        "coldCount": cold,
+        "neutralCount": max(0, len(temp_map) - hot - cold),
+        "avgTemperature": (
+            round(sum(temp_map.values()) / len(temp_map), 1) if temp_map else None
+        ),
     }

@@ -86,6 +86,12 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 .chip.gn { border-color: rgba(212,242,122,0.28); color: var(--accent); }
 .chip.md { border-color: rgba(242,201,122,0.28); color: var(--amber); }
 .chip.atm { border-color: rgba(184,122,242,0.28); color: #c9a0ff; }
+.temp-control { padding: 8px; border-top: 1px solid var(--border); }
+.temp-slider { width: 100%; height: 4px; cursor: pointer; margin: 4px 0; }
+.temp-bar { height: 4px; background: linear-gradient(90deg, #5a8cff 0%, #8899bb 50%, #f27a7a 100%); border-radius: 99px; overflow: hidden; opacity: 0.85; }
+.temp-fill { height: 100%; border-radius: 99px; transition: width 0.15s ease, background 0.15s ease; box-shadow: 0 0 6px rgba(255,255,255,0.15); }
+.temp-gauge { height: 8px; background: linear-gradient(90deg, #5a8cff 0%, #8899bb 50%, #f27a7a 100%); border-radius: 99px; position: relative; margin: 8px 0; }
+.temp-gauge-marker { position: absolute; top: -3px; width: 3px; height: 14px; background: #fff; border-radius: 2px; transform: translateX(-50%); box-shadow: 0 0 6px rgba(255,255,255,0.5); }
 .thumb { width: 60px; height: 34px; object-fit: cover; border-radius: 4px; background: var(--surface2); display: block; cursor: pointer; }
 
 .field { margin-bottom: 11px; }
@@ -461,7 +467,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <button class="btn btn-sm" onclick="openUserStats()">→ 全站統計頁</button>
       </div>
       <p style="font-size:11px;color:var(--text3);margin-top:8px;line-height:1.5">
-        喜歡／不喜歡會寫入 Google Sheets 工作表 <code>user_prefs</code>，重啟伺服器後仍保留。推薦依你已喜歡影片的類型、情緒、氛圍、場景標籤加權計分。<br>
+        喜歡溫度（0–100°）會寫入 Google Sheets 工作表 <code>user_prefs</code>。推薦依溫度加權：越熱的片標籤權重越高，越冷的片標籤會扣分。<br>
         <b>APP 海報請打 API</b>（勿直接讀 Sheets 原始 JSON）：<code>GET /api/sheets_card</code> 回傳的 <code>poster</code> 與 <code>thumb</code> 已與後台相同（TMDB／YouTube 自動補圖）。
       </p>
     </div>
@@ -476,7 +482,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="page-head">
       <div>
         <div class="page-title">個人喜好分析</div>
-        <div class="page-sub">依使用者已標記的喜歡／不喜歡，產生偏好輪廓與含分數、推薦理由的片單（<code>POST /api/user/analyze</code>）</div>
+        <div class="page-sub">依使用者溫度計評分（0°冷～100°熱）加權計算偏好輪廓與推薦片單（<code>POST /api/user/analyze</code>）</div>
       </div>
       <div class="btn-row">
         <button class="btn btn-accent" onclick="loadUserAnalyze()">執行分析</button>
@@ -488,7 +494,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <input class="fi" id="analyze-user" type="text" placeholder="與 APP 上傳 sync/push 時的 userName 相同">
       </div>
       <p style="font-size:11px;color:var(--text3);line-height:1.5;margin-top:8px">
-        需先在「APP 電影卡片」或手機 APP 對該使用者標記喜歡。分析結果含排名、加權分數與推薦理由標籤。
+        請先在「APP 電影卡片」對該使用者拖曳溫度計（或按 冷/中/熱）。分析依溫度加權：67°以上算偏好、33°以下算排斥。
       </p>
     </div>
     <div id="analyze-status" style="margin-bottom:16px"></div>
@@ -501,7 +507,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="page-head">
       <div>
         <div class="page-title">全站喜好統計</div>
-        <div class="page-sub">所有使用者的喜歡／不喜歡彙總與熱門類型（<code>GET /api/user/stats</code>）</div>
+        <div class="page-sub">全站溫度計評分彙總（0°冷～100°熱）與熱門偏好類型（<code>GET /api/user/stats</code>）</div>
       </div>
       <div class="btn-row">
         <button class="btn btn-accent" onclick="loadUserStats()">↻ 重新整理</button>
@@ -543,8 +549,40 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.55">
         <b>APP 多人同步（建議）：</b><br>
         上傳喜好：<code>POST /api/sync/push</code> · 拉取全部：<code>POST /api/sync/pull</code><br>
+        加入房間：<code>POST /api/room/join</code> 或 sync/push 帶 <code>roomCode</code><br>
         已發布推薦：<code>GET /api/push/feed?userName=名稱</code> · 全站總覽：<code>GET /api/admin/multi/overview</code>
       </p>
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px">
+          <div class="field" style="flex:2;min-width:180px">
+            <label class="fl">房間名稱（選填）</label>
+            <input class="fi" id="admin-room-name" type="text" placeholder="例如：A 區展覽場">
+          </div>
+          <div class="field" style="flex:1;min-width:120px">
+            <label class="fl">&nbsp;</label>
+            <button class="btn btn-accent" onclick="adminCreateRoom()">建立新房間（隨機代碼）</button>
+          </div>
+        </div>
+        <div id="admin-room-log" style="margin-bottom:10px;font-size:11px;font-family:'DM Mono',monospace;max-width:900px"></div>
+        <div style="overflow:auto;max-width:100%">
+          <table class="tbl" id="admin-room-table" style="width:100%;max-width:900px;font-size:12px">
+            <thead>
+              <tr>
+                <th>推送代碼</th>
+                <th>房間名稱</th>
+                <th>成員</th>
+                <th>建立時間</th>
+                <th>上次推送</th>
+                <th>狀態</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="admin-room-tbody">
+              <tr><td colspan="7" style="color:var(--text3)">載入中…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
       <div id="admin-multi-events" style="margin-top:10px;font-size:10px;color:var(--text3);max-width:900px;max-height:80px;overflow:auto"></div>
     </div>
 
@@ -609,7 +647,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <div class="field">
           <label class="fl">追加單筆 Gemini API Key</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <input class="fi" id="key-add-input" type="text" placeholder="AIza... 或 AQ...." style="flex:1;min-width:260px">
+            <input class="fi" id="key-add-input" type="text" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1;min-width:260px">
             <button class="btn btn-accent" onclick="addKey()">新增 Key</button>
           </div>
           <div style="font-size:10.5px;color:var(--text3);margin-top:3px">這裡會追加到現有清單，不會取代舊 Key</div>
@@ -617,7 +655,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 
         <div class="field">
           <label class="fl">Gemini API Keys（每行一組）</label>
-          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AQ.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"></textarea>
+          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AIzaYYYYYYYYYYYYYYYYYYYYYYY&#10;AIzaZZZZZZZZZZZZZZZZZZZZZZZ"></textarea>
           <div style="font-size:10.5px;color:var(--text3);margin-top:3px">儲存後舊的 Key 會被取代，請確認每行都是完整的 Key</div>
         </div>
 
@@ -754,6 +792,15 @@ const WEIGHT_LIKE_EMOTION = 2;
 const WEIGHT_LIKE_ATMOSPHERE = 2;
 const WEIGHT_LIKE_GENRE = 3;
 const WEIGHT_LIKE_SCENE = 1;
+const TEMP_LIKE = 85;
+const TEMP_DISLIKE = 15;
+const TEMP_NEUTRAL = 50;
+const TEMP_HOT = 67;
+const TEMP_COLD = 33;
+const TEMP_COLOR_COLD = "#5a8cff";
+const TEMP_COLOR_HOT = "#f27a7a";
+const TEMP_COLOR_MID = "#8899bb";
+let userTempCache = {};
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(API + path, {
@@ -1024,6 +1071,51 @@ function movieSearchText(m) {
   ].join(' ').toLowerCase();
 }
 
+function movieSearchTags(m) {
+  const tags = [
+    ...(m.genres || []),
+    ...movieEmotions(m),
+    ...movieAtmospheres(m),
+    ...(m.scenes || []),
+    ...(m.scenesMain || []),
+    ...(m.scenesSub || []),
+  ];
+  return tags.map(t => String(t).trim().toLowerCase()).filter(Boolean);
+}
+
+function termMatchesText(text, term) {
+  const t = String(term || '').trim().toLowerCase();
+  if (!t) return false;
+  const haystack = String(text || '').toLowerCase();
+  if (/^[a-z0-9]+$/i.test(t)) {
+    if (t.length <= 3) {
+      const re = new RegExp('(?:^|[^a-z0-9])' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:[^a-z0-9]|$)', 'i');
+      return re.test(haystack);
+    }
+    return haystack.includes(t);
+  }
+  if (t.length < 2) return false;
+  return haystack.includes(t);
+}
+
+function termMatchesTags(tags, term) {
+  const t = String(term || '').trim().toLowerCase();
+  if (!t || t.length < 2) return false;
+  return tags.some(tag => tag === t || tag.includes(t));
+}
+
+function termMatchesMovie(m, term) {
+  const tags = movieSearchTags(m);
+  if (termMatchesTags(tags, term)) return true;
+  const text = [
+    m.title,
+    movieYear(m),
+    m.desc || '',
+    m.actors || (Array.isArray(m.cast) ? m.cast.join(' ') : (m.cast || '')),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return termMatchesText(text, term);
+}
+
 function rebuildSearchSynonymMap(groups) {
   searchSynonymGroups = groups || [];
   searchSynonymMap = new Map();
@@ -1031,21 +1123,27 @@ function rebuildSearchSynonymMap(groups) {
     const terms = group.map(t => String(t).trim().toLowerCase()).filter(Boolean);
     if (terms.length < 2) continue;
     const bucket = new Set(terms);
-    for (const term of terms) searchSynonymMap.set(term, bucket);
+    for (const term of terms) {
+      if (!searchSynonymMap.has(term)) searchSynonymMap.set(term, bucket);
+    }
   }
 }
 
 function expandSearchQuery(query) {
   const parts = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!parts.length) return [];
-  return parts.map(part => [...(searchSynonymMap.get(part) || new Set([part]))]);
+  return parts.map(part => {
+    const bucket = searchSynonymMap.get(part) || new Set([part]);
+    const arr = [...bucket];
+    if (arr.includes(part)) return [part, ...arr.filter(x => x !== part)];
+    return arr;
+  });
 }
 
 function movieMatchesSearch(m, query) {
   const expanded = expandSearchQuery(query);
   if (!expanded.length) return true;
-  const text = movieSearchText(m);
-  return expanded.every(group => group.some(term => text.includes(term)));
+  return expanded.every(group => group.some(term => termMatchesMovie(m, term)));
 }
 
 function searchHintHtml(query) {
@@ -1131,55 +1229,40 @@ async function saveSearchSynonyms() {
 }
 
 function resetSearchSynonyms() {
-  const defaults = [
-    ['恐怖','驚悚','靈異','怪談','鬼片','懸疑'],
-    ['喜劇','搞笑','幽默','荒謬','輕喜劇'],
-    ['愛情','浪漫','虐戀','戀愛'],
-    ['科幻','奇幻','超自然','末日','賽博龐克'],
-    ['動作','武打','槍戰','打鬥'],
-    ['犯罪','黑幫','警匪','推理','罪案'],
-    ['心理驚悚','燒腦','反轉','懸而未決'],
-    ['溫馨','療癒','暖心','合家歡'],
-    ['黑暗','壓抑','陰鬱','沉重'],
-    ['緊張','刺激','高壓'],
-    ['感動','催淚','心碎'],
-    ['城市','都市','都會','街道'],
-    ['鄉村','小鎮','田園','農村'],
-    ['學校','教室','校園','宿舍'],
-    ['醫院','病房','醫療'],
-    ['監獄','囚禁','牢籠'],
-    ['森林','荒野','山林'],
-    ['海邊','海岸','海洋','漁村'],
-    ['公寓','住宅','老屋','弄巷'],
-    ['辦公室','職場','公司','加班'],
-    ['酒吧','夜店','居酒屋'],
-    ['青春','成長','少年','少女'],
-    ['家庭','親子','母女','父子'],
-    ['女性','女力','女性議題'],
-    ['同志','LGBT','酷兒','彩虹'],
-    ['武俠','古裝','江湖','仙俠'],
-    ['紀錄','紀錄片','社會議題'],
-    ['戰爭','軍事','戰場'],
-    ['動畫','卡通','anime'],
-    ['公路片','旅途','流浪','出走'],
-    ['實驗','獨立片','作者電影'],
-    ['台灣','國片','本土'],
-    ['華語','中文','國語片'],
-    ['香港','港片','粵語'],
-    ['日本','日系','日片'],
-    ['韓國','韓片'],
-    ['歐美','好萊塢','美國片'],
-    ['復古','懷舊','年代感'],
-    ['夢幻','迷幻','詩意'],
-    ['霓虹','賽博','夜生活'],
-    ['移民','異鄉','漂泊'],
-    ['底層','弱勢','小人物'],
-    ['復仇','報復'],
-    ['救贖','懺悔','和解'],
-    ['逃亡','亡命','躲藏'],
-  ];
   const ta = document.getElementById('synonyms-input');
-  if (ta) ta.value = formatSynonymTextarea(defaults);
+  const st = document.getElementById('synonyms-save-status');
+  if (st) {
+    st.className = 'sbox show loading';
+    st.innerHTML = '<span class="spin"></span> 載入預設詞庫…';
+  }
+  const urls = [
+    '/api/search/synonyms?defaults=1',
+    '/api/search/synonyms/defaults',
+    '/synonyms_defaults.json',
+  ];
+  (async () => {
+    let lastErr = '載入失敗';
+    for (const url of urls) {
+      try {
+        const r = await apiFetch(url);
+        if (!r.ok || !Array.isArray(r.groups)) throw new Error(r.error || '載入失敗');
+        rebuildSearchSynonymMap(r.groups);
+        if (ta) ta.value = formatSynonymTextarea(r.groups);
+        if (st) {
+          st.className = 'sbox show ok';
+          st.textContent = `✓ 已載入 ${r.groups.length} 組預設相近詞（尚未儲存）`;
+        }
+        renderList();
+        return;
+      } catch (e) {
+        lastErr = e.message || String(e);
+      }
+    }
+    if (st) {
+      st.className = 'sbox show err';
+      st.textContent = '✗ 載入預設失敗：' + lastErr + '（請重啟 server.py 或重新部署）';
+    }
+  })();
 }
 
 async function renderList() {
@@ -2661,12 +2744,6 @@ async function ytBatchAnalyze() {
 // =====================================================================
 // API KEY 設定功能
 // =====================================================================
-const GEMINI_API_KEY_RE = /^(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_.-]{20,})$/;
-
-function isValidGeminiApiKey(key) {
-  return GEMINI_API_KEY_RE.test(String(key || '').trim());
-}
-
 async function loadKeyStatus() {
   const el = document.getElementById('keys-status');
   if (!el) return;
@@ -2691,9 +2768,9 @@ async function addKey() {
   const inp = document.getElementById('key-add-input');
   const st = document.getElementById('keys-save-status');
   const key = (inp?.value || '').trim();
-  if (!isValidGeminiApiKey(key)) {
+  if (!key.startsWith('AIza')) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Gemini API Key';
+    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
     return;
   }
 
@@ -2718,12 +2795,12 @@ async function addKey() {
 
 async function saveKeys() {
   const raw = document.getElementById('keys-input').value.trim();
-  const keys = raw.split('\n').map(k => k.trim()).filter(isValidGeminiApiKey);
+  const keys = raw.split('\n').map(k => k.trim()).filter(k => k.startsWith('AIza'));
   const st = document.getElementById('keys-save-status');
 
   if (keys.length === 0) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Gemini API Key';
+    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
     return;
   }
 
@@ -2772,32 +2849,101 @@ async function getUser(userName) {
   }
 }
 
-async function likeMovie(userName, movieId) {
+async function loadUserTemperatures(userName) {
+  if (!userName || userName === "guest") {
+    userTempCache[userName] = {};
+    return {};
+  }
   try {
-    await apiFetch("/api/user/like", {
-      method: "POST",
-      body: JSON.stringify({ userName, movieId })
-    });
-    toast("已記錄喜歡", "ok");
-    return true;
+    const res = await getUserData(userName);
+    userTempCache[userName] = res?.user?.temperatures || res?.prefs?.temperatures || {};
   } catch (e) {
-    toast("喜歡失敗", "err");
+    userTempCache[userName] = {};
+  }
+  return userTempCache[userName];
+}
+
+function getCachedTemp(userName, movieId) {
+  const t = userTempCache[userName]?.[movieId];
+  return t != null ? Number(t) : null;
+}
+
+function tempColor(temp) {
+  const t = Math.max(0, Math.min(100, Number(temp)));
+  if (t <= TEMP_COLD) return TEMP_COLOR_COLD;
+  if (t >= TEMP_HOT) return TEMP_COLOR_HOT;
+  const ratio = t / 100;
+  const r = Math.round(90 + (242 - 90) * ratio);
+  const g = Math.round(140 + (122 - 140) * ratio);
+  const b = Math.round(255 + (122 - 255) * ratio);
+  return `rgb(${r},${g},${b})`;
+}
+
+function updateTempUi(movieId, temp) {
+  const lbl = document.getElementById("temp-lbl-" + movieId);
+  const fill = document.getElementById("temp-fill-" + movieId);
+  const slider = document.querySelector(`.temp-slider[data-movie="${movieId}"]`);
+  const t = Math.round(Number(temp));
+  const color = tempColor(t);
+  if (lbl) { lbl.textContent = t + "°"; lbl.style.color = color; }
+  if (fill) { fill.style.width = t + "%"; fill.style.background = "rgba(255,255,255,0.22)"; }
+  if (slider) slider.value = t;
+}
+
+function previewTemp(userName, movieId, val) {
+  updateTempUi(movieId, val);
+}
+
+function thermometerCardHtml(userName, movieId, currentTemp) {
+  const temp = currentTemp != null ? Math.round(Number(currentTemp)) : TEMP_NEUTRAL;
+  const safeUser = String(userName || "guest").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const safeId = String(movieId || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const color = tempColor(temp);
+  return `
+    <div class="temp-control">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+        <span style="font-size:10px;color:var(--text3)">🌡 喜好溫度</span>
+        <span style="font-size:11px;font-weight:700;font-family:'DM Mono',monospace;color:${color}" id="temp-lbl-${safeId}">${temp}°</span>
+      </div>
+      <input type="range" class="temp-slider" data-movie="${safeId}" min="0" max="100" value="${temp}"
+        oninput="previewTemp('${safeUser}','${safeId}',this.value)"
+        onchange="rateMovie('${safeUser}','${safeId}',this.value)">
+      <div class="temp-bar"><div class="temp-fill" id="temp-fill-${safeId}" style="width:${temp}%;background:rgba(255,255,255,0.22)"></div></div>
+      <div style="display:flex;gap:4px;margin-top:6px">
+        <button class="btn btn-sm" type="button" style="flex:1;font-size:9px;padding:4px;border-color:rgba(90,140,255,0.45);color:${TEMP_COLOR_COLD}"
+          onclick="rateMovie('${safeUser}','${safeId}',${TEMP_DISLIKE})">冷 ${TEMP_DISLIKE}°</button>
+        <button class="btn btn-sm" type="button" style="flex:1;font-size:9px;padding:4px;color:${TEMP_COLOR_MID}"
+          onclick="rateMovie('${safeUser}','${safeId}',${TEMP_NEUTRAL})">${TEMP_NEUTRAL}°</button>
+        <button class="btn btn-sm btn-danger" type="button" style="flex:1;font-size:9px;padding:4px"
+          onclick="rateMovie('${safeUser}','${safeId}',${TEMP_LIKE})">熱 ${TEMP_LIKE}°</button>
+      </div>
+    </div>`;
+}
+
+async function rateMovie(userName, movieId, temperature) {
+  const temp = Math.max(0, Math.min(100, Math.round(Number(temperature))));
+  try {
+    const res = await apiFetch("/api/user/rate", {
+      method: "POST",
+      body: JSON.stringify({ userName, movieId, temperature: temp })
+    });
+    if (!userTempCache[userName]) userTempCache[userName] = {};
+    userTempCache[userName][movieId] = temp;
+    updateTempUi(movieId, temp);
+    toast(`已記錄 ${temp}°`, "ok");
+    return res?.ok;
+  } catch (e) {
+    toast("評分失敗", "err");
     return false;
   }
 }
 
+async function likeMovie(userName, movieId) {
+  return rateMovie(userName, movieId, TEMP_LIKE);
+}
+
 async function dislikeMovie(userName, movieId) {
-  try {
-    await apiFetch("/api/user/dislike", {
-      method: "POST",
-      body: JSON.stringify({ userName, movieId })
-    });
-    toast("已記錄不喜歡", "ok");
-    return true;
-  } catch (e) {
-    toast("不喜歡失敗", "err");
-    return false;
-  }
+  return rateMovie(userName, movieId, TEMP_DISLIKE);
 }
 
 async function getRecommendCards(userName, limit = 20) {
@@ -2836,22 +2982,36 @@ function renderUserProfile(profile, coldStart, detailed = false, profileElId = "
   const atmospheres = (profile.topAtmospheres || []).map(x => x.tag).join("、") || "—";
   const scenes = (profile.topScenes || []).map(x => x.tag).join("、") || "—";
   const avoid = (profile.avoidGenres || []).map(x => x.tag).join("、") || "—";
-  const liked = (profile.likedTitles || []).slice(0, 8).join("、") || "尚無";
-  const disliked = (profile.dislikedTitles || []).slice(0, 5).join("、") || "—";
+  const avgTemp = profile.avgTemperature;
+  const ratedCount = profile.ratedCount || 0;
+  const hotCount = profile.hotCount || profile.likeCount || 0;
+  const coldCount = profile.coldCount || profile.dislikeCount || 0;
+  const topRated = (profile.topRated || []).slice(0, 6);
+  const gaugePct = avgTemp != null ? Math.max(0, Math.min(100, avgTemp)) : 50;
+  const topRatedHtml = topRated.length
+    ? topRated.map(r =>
+        `<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 6px;border-radius:4px;font-size:10px;background:rgba(255,255,255,0.04);border:1px solid var(--border)">${escapeHtml(r.title)} <b style="color:${tempColor(r.temperature)}">${Math.round(r.temperature)}°</b></span>`
+      ).join("")
+    : "尚無";
   el.style.display = "block";
   el.innerHTML = `
     <div class="sbox show ${detailed ? "ok" : ""}" style="font-size:12px;line-height:1.6">
-      ${detailed ? "<div style='font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px'>📊 喜好分析報告</div>" : ""}
-      ${coldStart ? "<div style='color:var(--warn);margin-bottom:6px'>尚未標記喜歡，目前為冷啟動（顯示片庫前幾部）</div>" : ""}
-      <div><b>已喜歡</b> ${profile.likeCount || 0} 部 · <b>不喜歡</b> ${profile.dislikeCount || 0} 部</div>
+      ${detailed ? "<div style='font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px'>📊 喜好分析報告（溫度計加權）</div>" : ""}
+      ${coldStart ? "<div style='color:var(--warn);margin-bottom:6px'>尚未有偏熱評分（需 &gt;50°），目前為冷啟動</div>" : ""}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+        <span><b>已評分</b> ${ratedCount} 部</span>
+        <span><b>偏熱</b> <span style="color:${TEMP_COLOR_HOT}">${hotCount}</span>（≥${TEMP_HOT}°）</span>
+        <span><b>偏冷</b> <span style="color:${TEMP_COLOR_COLD}">${coldCount}</span>（≤${TEMP_COLD}°）</span>
+        ${avgTemp != null ? `<span><b>平均溫度</b> <span style="font-family:'DM Mono',monospace;color:${tempColor(avgTemp)}">${avgTemp}°</span></span>` : ""}
+      </div>
+      ${avgTemp != null ? `<div class="temp-gauge"><div class="temp-gauge-marker" style="left:${gaugePct}%"></div></div>` : ""}
       <div style="margin-top:4px"><b>偏好類型</b>：${genres}</div>
       <div><b>偏好情緒</b>：${emotions}</div>
       <div><b>偏好氛圍</b>：${atmospheres}</div>
       ${detailed ? `<div><b>偏好場景</b>：${scenes}</div>
       <div style="margin-top:4px"><b>會避開的類型</b>：${avoid}</div>
-      <div style="margin-top:4px;color:var(--text3)"><b>不喜歡</b>：${disliked}</div>` : ""}
-      <div style="margin-top:4px;color:var(--text3)"><b>近期喜歡</b>：${liked}</div>
-      ${detailed ? `<div style="margin-top:8px;font-size:10px;color:var(--text3)">下方卡片依標籤加權排序（類型×${WEIGHT_LIKE_GENRE}、情緒×${WEIGHT_LIKE_EMOTION}、氛圍×${WEIGHT_LIKE_ATMOSPHERE}、場景×${WEIGHT_LIKE_SCENE}）</div>` : ""}
+      <div style="margin-top:8px"><b>最高溫片單</b><div style="margin-top:4px;line-height:1.5">${topRatedHtml}</div></div>` : ""}
+      ${detailed ? `<div style="margin-top:8px;font-size:10px;color:var(--text3)">加權：標籤權重 × (溫度−50)/50；類型×${WEIGHT_LIKE_GENRE}、情緒×${WEIGHT_LIKE_EMOTION}、氛圍×${WEIGHT_LIKE_ATMOSPHERE}、場景×${WEIGHT_LIKE_SCENE}</div>` : ""}
     </div>
   `;
 }
@@ -2888,11 +3048,16 @@ async function renderAppCards(cards, opts = {}) {
   const mode = opts.mode || "list";
   const userInputId = opts.userInputId || "app-user";
   if (!grid || !status) return;
-  const appUser = (document.getElementById(userInputId)?.value || "guest").replace(/'/g, "\\'");
+  const appUserRaw = document.getElementById(userInputId)?.value?.trim() || "guest";
+  const appUser = appUserRaw.replace(/'/g, "\\'");
 
   if (!cards.length) {
-    grid.innerHTML = "<div style='color:#888'>無資料（可先標記幾部喜歡再載入推薦）</div>";
+    grid.innerHTML = "<div style='color:#888'>無資料（可先對幾部片評分再載入推薦）</div>";
     return;
+  }
+
+  if (appUserRaw && appUserRaw !== "guest") {
+    await loadUserTemperatures(appUserRaw);
   }
 
   const label = opts.label || `共 ${cards.length} 張 APP 卡片`;
@@ -2938,10 +3103,7 @@ async function renderAppCards(cards, opts = {}) {
         <img class="yt-thumb" src="${poster}" alt="${title}"
              onerror="this.onerror=null;this.src=PLACEHOLDER_POSTER">
         <div class="yt-info">${metaBlock}</div>
-        <div style="padding:8px;display:flex;gap:6px">
-          <button class="btn btn-sm" onclick="likeMovie('${appUser}','${c.id}')">👍 喜歡</button>
-          <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${appUser}','${c.id}')">👎 不喜歡</button>
-        </div>
+        ${thermometerCardHtml(appUserRaw, c.id, getCachedTemp(appUserRaw, c.id))}
       </div>`;
       continue;
     }
@@ -2954,10 +3116,7 @@ async function renderAppCards(cards, opts = {}) {
           <div class="yt-title">${title}</div>
           ${metaBlock}
         </div>
-        <div style="padding:8px;display:flex;gap:6px">
-          <button class="btn btn-sm" onclick="likeMovie('${appUser}','${c.id}')">👍 喜歡</button>
-          <button class="btn btn-sm btn-danger" onclick="dislikeMovie('${appUser}','${c.id}')">👎 不喜歡</button>
-        </div>
+        ${thermometerCardHtml(appUserRaw, c.id, getCachedTemp(appUserRaw, c.id))}
       </div>
     `;
   }
@@ -3016,6 +3175,93 @@ async function loadUserAnalyze() {
   }
 }
 
+function userTempBarHtml(avgTemp, height = 8) {
+  const t = avgTemp != null ? Math.max(0, Math.min(100, Number(avgTemp))) : null;
+  if (t == null) {
+    return `
+      <div class="temp-gauge" style="height:${height}px;margin:0;opacity:0.35"></div>
+      <div style="font-size:9px;color:var(--text3);margin-top:3px">尚無評分</div>`;
+  }
+  return `
+    <div class="temp-gauge" style="height:${height}px;margin:0">
+      <div class="temp-gauge-marker" style="left:${t}%;top:-2px;height:${height + 4}px;background:${tempColor(t)}"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:2px;font-size:8px;color:var(--text3)">
+      <span style="color:${TEMP_COLOR_COLD}">0°</span>
+      <span style="font-family:'DM Mono',monospace;color:${tempColor(t)}">${Math.round(t)}°</span>
+      <span style="color:${TEMP_COLOR_HOT}">100°</span>
+    </div>`;
+}
+
+function userTempDistributionHtml(hot, neutral, cold) {
+  const total = Math.max(1, hot + neutral + cold);
+  const coldPct = Math.round((cold / total) * 100);
+  const neutralPct = Math.round((neutral / total) * 100);
+  const hotPct = Math.max(0, 100 - coldPct - neutralPct);
+  if (hot + neutral + cold === 0) {
+    return `<div style="height:6px;border-radius:99px;background:rgba(255,255,255,0.06);margin-top:6px"></div>`;
+  }
+  return `
+    <div style="height:6px;border-radius:99px;overflow:hidden;display:flex;margin-top:6px">
+      <div style="width:${coldPct}%;background:${TEMP_COLOR_COLD}" title="冷 ${cold}"></div>
+      <div style="width:${neutralPct}%;background:${TEMP_COLOR_MID}" title="中 ${neutral}"></div>
+      <div style="width:${hotPct}%;background:${TEMP_COLOR_HOT}" title="熱 ${hot}"></div>
+    </div>`;
+}
+
+function userDetailRowHtml(u, idx) {
+  const avg = u.avgTemperature;
+  const rated = u.ratedCount || 0;
+  const hot = u.hotCount ?? u.likeCount ?? 0;
+  const cold = u.coldCount ?? u.dislikeCount ?? 0;
+  const neutral = u.neutralCount ?? Math.max(0, rated - hot - cold);
+  const rankColor = avg != null ? tempColor(avg) : TEMP_COLOR_MID;
+  const rankBadge = idx < 3
+    ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid ${rankColor};color:${rankColor};font-size:9px;font-family:'DM Mono',monospace">#${idx + 1}</span>`
+    : `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;border-radius:999px;background:rgba(255,255,255,0.04);color:var(--text3);font-size:9px;font-family:'DM Mono',monospace">#${idx + 1}</span>`;
+  const avgLabel = avg != null
+    ? `<span style="font-family:'DM Mono',monospace;font-weight:700;font-size:12px;color:${tempColor(avg)}">${avg}°</span>`
+    : `<span style="color:var(--text3);font-size:11px">—</span>`;
+  return `
+    <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.08)">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <span style="font-size:11px;display:flex;align-items:center;gap:6px">${rankBadge}${escapeHtml(u.userName)}</span>
+        <span style="font-size:10px;display:flex;align-items:center;gap:8px">
+          ${avgLabel}
+          <span style="color:var(--text3);font-family:'DM Mono',monospace">${rated} 部</span>
+        </span>
+      </div>
+      ${userTempBarHtml(avg, 8)}
+      ${userTempDistributionHtml(hot, neutral, cold)}
+      <div style="margin-top:4px;font-size:9px;display:flex;gap:12px">
+        <span style="color:${TEMP_COLOR_HOT}">▲ 熱 ${hot}</span>
+        <span style="color:${TEMP_COLOR_MID}">● 中 ${neutral}</span>
+        <span style="color:${TEMP_COLOR_COLD}">▼ 冷 ${cold}</span>
+      </div>
+    </div>`;
+}
+
+function tempDistributionBarHtml(dist) {
+  const cold = dist?.cold || 0;
+  const neutral = dist?.neutral || 0;
+  const hot = dist?.hot || 0;
+  const total = Math.max(1, cold + neutral + hot);
+  const coldPct = Math.round((cold / total) * 100);
+  const neutralPct = Math.round((neutral / total) * 100);
+  const hotPct = 100 - coldPct - neutralPct;
+  return `
+    <div style="height:8px;border-radius:99px;overflow:hidden;display:flex;background:rgba(255,255,255,0.06)">
+      <div style="width:${coldPct}%;background:${TEMP_COLOR_COLD}" title="偏冷 ≤${TEMP_COLD}°"></div>
+      <div style="width:${neutralPct}%;background:${TEMP_COLOR_MID}" title="中性"></div>
+      <div style="width:${hotPct}%;background:${TEMP_COLOR_HOT}" title="偏熱 ≥${TEMP_HOT}°"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px">
+      <span style="color:${TEMP_COLOR_COLD}">▼ 冷 ${cold}</span>
+      <span style="color:${TEMP_COLOR_MID}">● 中 ${neutral}</span>
+      <span style="color:${TEMP_COLOR_HOT}">▲ 熱 ${hot}</span>
+    </div>`;
+}
+
 async function loadUserStats() {
   const dash = document.getElementById("stats-dashboard");
   if (!dash) return;
@@ -3023,10 +3269,16 @@ async function loadUserStats() {
   try {
     const s = await getUserStats();
     const userCount = s.userCount || 0;
-    const totalLikes = s.totalLikes || 0;
-    const totalDislikes = s.totalDislikes || 0;
-    const totalVotes = Math.max(1, totalLikes + totalDislikes);
-    const likeRate = Math.round((totalLikes / totalVotes) * 100);
+    const totalRated = s.totalRated || 0;
+    const totalHot = s.totalHot ?? s.totalLikes ?? 0;
+    const totalCold = s.totalCold ?? s.totalDislikes ?? 0;
+    const avgTemp = s.avgTemperature;
+    const gaugePct = avgTemp != null ? Math.max(0, Math.min(100, avgTemp)) : 50;
+    const dist = s.temperatureDistribution || {
+      cold: totalCold,
+      neutral: s.totalNeutral || 0,
+      hot: totalHot,
+    };
 
     const topGenres = (s.topGenresAcrossUsers || []).slice(0, 10);
     const genresHtml = topGenres.length
@@ -3039,57 +3291,50 @@ async function loadUserStats() {
       : `<span style="color:var(--text3)">—</span>`;
 
     const sortedUsers = (s.users || []).slice().sort((a, b) =>
-      (b.likeCount - a.likeCount) || (a.dislikeCount - b.dislikeCount)
+      (b.avgTemperature ?? -1) - (a.avgTemperature ?? -1) || (b.ratedCount - a.ratedCount)
     );
     const usersHtml = sortedUsers.length
-      ? sortedUsers.map((u, idx) => {
-          const total = Math.max(1, (u.likeCount || 0) + (u.dislikeCount || 0));
-          const likePct = Math.round(((u.likeCount || 0) / total) * 100);
-          const dislikePct = 100 - likePct;
-          const rankBadge = idx < 3
-            ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;border-radius:999px;background:var(--accent-dim);color:var(--accent);font-size:9px;font-family:'DM Mono',monospace">#${idx + 1}</span>`
-            : `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:16px;border-radius:999px;background:rgba(255,255,255,0.04);color:var(--text3);font-size:9px;font-family:'DM Mono',monospace">#${idx + 1}</span>`;
-          return `
-          <div style="padding:9px 0;border-bottom:1px dashed rgba(255,255,255,0.08)">
-            <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
-              <span style="font-size:11px;display:flex;align-items:center;gap:6px">${rankBadge}${escapeHtml(u.userName)}</span>
-              <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace">👍 ${u.likeCount} · 👎 ${u.dislikeCount}</span>
-            </div>
-            <div style="margin-top:6px;height:6px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;display:flex">
-              <div style="width:${likePct}%;background:var(--accent)"></div>
-              <div style="width:${dislikePct}%;background:rgba(242,122,122,0.55)"></div>
-            </div>
-          </div>`;
-        }).join("")
+      ? sortedUsers.map((u, idx) => userDetailRowHtml(u, idx)).join("")
       : `<div style="font-size:11px;color:var(--text3)">尚無使用者資料</div>`;
 
     dash.innerHTML = `
       <div class="sbox show ok" style="font-size:12px;line-height:1.55;padding:14px;background:linear-gradient(180deg,rgba(212,242,122,0.05),rgba(255,255,255,0.01));border-color:rgba(212,242,122,0.22)">
-        <div style="display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:8px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;margin-bottom:10px">🌡 全站溫度計統計 <span style="font-size:10px;font-weight:400;color:var(--text3)">藍=冷 · 紅=熱</span></div>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(100px,1fr));gap:8px;margin-bottom:10px">
           <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
             <div style="font-size:10px;color:var(--text3)">使用者</div>
             <div style="font-size:17px;font-weight:700">${userCount}</div>
           </div>
           <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
-            <div style="font-size:10px;color:var(--text3)">總喜歡</div>
-            <div style="font-size:17px;font-weight:700;color:var(--accent)">${totalLikes}</div>
+            <div style="font-size:10px;color:var(--text3)">總評分</div>
+            <div style="font-size:17px;font-weight:700">${totalRated}</div>
           </div>
           <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
-            <div style="font-size:10px;color:var(--text3)">總不喜歡</div>
-            <div style="font-size:17px;font-weight:700;color:var(--red)">${totalDislikes}</div>
+            <div style="font-size:10px;color:var(--text3)">全站均溫</div>
+            <div style="font-size:17px;font-weight:700;color:${avgTemp != null ? tempColor(avgTemp) : 'var(--text)'}">${avgTemp != null ? avgTemp + "°" : "—"}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;padding:9px">
+            <div style="font-size:10px;color:var(--text3)">偏熱 / 偏冷</div>
+            <div style="font-size:14px;font-weight:700;margin-top:2px">
+              <span style="color:${TEMP_COLOR_HOT}">${totalHot}</span>
+              <span style="color:var(--text3);font-weight:400"> / </span>
+              <span style="color:${TEMP_COLOR_COLD}">${totalCold}</span>
+            </div>
           </div>
         </div>
-        <div style="margin:2px 0 10px 0;padding:7px 9px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.02);display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <span style="font-size:11px"><b>整體喜歡率</b></span>
-          <span style="font-size:12px;font-family:'DM Mono',monospace;color:var(--accent)">${likeRate}%</span>
+        ${avgTemp != null ? `<div class="temp-gauge" style="margin-bottom:4px"><div class="temp-gauge-marker" style="left:${gaugePct}%"></div></div>
+        <div style="font-size:9px;color:var(--text3);text-align:center;margin-bottom:10px">全站平均 ${avgTemp}° <span style="color:${TEMP_COLOR_COLD}">◀ 冷</span> · <span style="color:${TEMP_COLOR_HOT}">熱 ▶</span></div>` : ""}
+        <div style="margin:0 0 10px 0;padding:8px 9px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;background:rgba(255,255,255,0.02)">
+          <div style="font-size:11px;margin-bottom:6px"><b>評分溫度分布</b> <span style="color:var(--text3);font-size:10px">（≤${TEMP_COLD}° 冷 · ${TEMP_NEUTRAL}° 中 · ≥${TEMP_HOT}° 熱）</span></div>
+          ${tempDistributionBarHtml(dist)}
         </div>
-        <div style="font-size:11px;margin-bottom:8px"><b>熱門偏好類型</b></div>
+        <div style="font-size:11px;margin-bottom:8px"><b>熱門偏好類型</b> <span style="color:var(--text3);font-size:10px">（依偏熱評分加權）</span></div>
         <div style="margin-bottom:10px">${genresHtml}</div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <div style="font-size:11px"><b>使用者明細（依喜歡數排序）</b></div>
-          <div style="font-size:10px;color:var(--text3)">綠：喜歡｜紅：不喜歡</div>
+          <div style="font-size:11px"><b>使用者明細</b> <span style="color:var(--text3);font-size:10px">（依均溫排序 · <span style="color:${TEMP_COLOR_COLD}">藍冷</span> <span style="color:${TEMP_COLOR_HOT}">紅熱</span>）</span></div>
+          <div style="font-size:10px;color:var(--text3)">🌡 溫度計</div>
         </div>
-        <div style="max-height:180px;overflow:auto;padding-right:4px">${usersHtml}</div>
+        <div style="max-height:220px;overflow:auto;padding-right:4px">${usersHtml}</div>
       </div>`;
   } catch (e) {
     toast("統計載入失敗", "err");
@@ -3131,9 +3376,8 @@ async function loadAdminPushDashboard() {
     }
     if (!users.length) {
       tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text3)">尚無使用者（請 APP 呼叫 sync/push 或按喜歡）</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = users.map(u => {
+    } else {
+      tbody.innerHTML = users.map(u => {
       const pub = u.publishedAt ? u.publishedAt.replace("T", " ").replace("Z", " UTC") : "—";
       const safe = escapeHtml(u.userName);
       const status = u.pushStale
@@ -3153,7 +3397,9 @@ async function loadAdminPushDashboard() {
         </td>
       </tr>`;
     }).join("");
-    log.innerHTML = `<div class="sbox show">Sheets: <code>${escapeHtml(res.prefsSheet)}</code> · <code>${escapeHtml(res.feedSheet)}</code> · <code>${escapeHtml(res.eventsSheet)}</code> · ${users.filter(x => x.hasPush).length} 人已推送</div>`;
+    }
+    log.innerHTML = `<div class="sbox show">Sheets: <code>${escapeHtml(res.prefsSheet)}</code> · <code>${escapeHtml(res.feedSheet)}</code> · <code>${escapeHtml(res.eventsSheet)}</code> · <code>${escapeHtml(res.roomsSheet || "multi_rooms")}</code> · ${users.filter(x => x.hasPush).length} 人已推送</div>`;
+    renderAdminRooms(res.rooms || []);
   } catch (e) {
     statsEl.innerHTML = `<div class="sbox show err">載入失敗</div>`;
     tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(e.message)}</td></tr>`;
@@ -3165,6 +3411,97 @@ function adminPushParams() {
     limit: parseInt(document.getElementById("admin-push-limit")?.value, 10) || 20,
     message: document.getElementById("admin-push-message")?.value?.trim() || ""
   };
+}
+
+function renderAdminRooms(rooms) {
+  const tbody = document.getElementById("admin-room-tbody");
+  if (!tbody) return;
+  if (!rooms.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--text3)">尚無房間，請按「建立新房間」</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rooms.map(r => {
+    const code = escapeHtml(r.code || "");
+    const safeCode = (r.code || "").replace(/'/g, "\\'");
+    const created = (r.createdAt || "—").replace("T", " ").replace("Z", " UTC");
+    const pushed = (r.lastPushAt || "—").replace("T", " ").replace("Z", " UTC");
+    const status = r.status === "closed"
+      ? `<span style="color:var(--text3)">已關閉</span>`
+      : `<span style="color:var(--accent)">進行中</span>`;
+    const members = (r.members || []).map(m => escapeHtml(m)).join("、") || "—";
+    return `<tr>
+      <td><b style="font-family:'DM Mono',monospace;letter-spacing:1px;font-size:13px">${code}</b>
+        <button class="btn btn-sm" style="margin-left:6px" onclick="adminCopyRoomCode('${safeCode}')">複製</button></td>
+      <td>${escapeHtml(r.roomName || "—")}</td>
+      <td style="font-size:10px;max-width:160px">${members}<br><span style="color:var(--text3)">${r.memberCount || 0} 人</span></td>
+      <td style="font-size:10px;font-family:'DM Mono',monospace">${escapeHtml(created)}</td>
+      <td style="font-size:10px;font-family:'DM Mono',monospace">${escapeHtml(pushed)}</td>
+      <td>${status}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-accent" onclick="adminPublishRoom('${safeCode}')" ${r.status === "closed" ? "disabled" : ""}>推送全員</button>
+        <button class="btn btn-sm" onclick="adminCloseRoom('${safeCode}')" ${r.status === "closed" ? "disabled" : ""}>關閉</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function adminCopyRoomCode(code) {
+  navigator.clipboard.writeText(code).then(() => toast(`已複製房間代碼 ${code}`, "ok")).catch(() => toast(code, "ok"));
+}
+
+async function adminCreateRoom() {
+  const roomName = document.getElementById("admin-room-name")?.value?.trim() || "";
+  const { message } = adminPushParams();
+  const log = document.getElementById("admin-room-log");
+  if (log) log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>建立房間…</div>`;
+  try {
+    const res = await apiFetch("/api/room/create", {
+      method: "POST",
+      body: JSON.stringify({ roomName, message })
+    });
+    if (!res.ok) throw new Error(res.error || "建立失敗");
+    const code = res.room?.code || "";
+    toast(`房間已建立：${code}`, "ok");
+    if (log) log.innerHTML = `<div class="sbox show ok">✓ 新房間代碼 <b style="font-family:DM Mono,monospace">${escapeHtml(code)}</b>（請提供給 APP 使用者輸入）</div>`;
+    loadAdminPushDashboard();
+  } catch (e) {
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminPublishRoom(roomCode) {
+  const { limit, message } = adminPushParams();
+  if (!confirm(`確定對房間 ${roomCode} 內所有成員發布個人化推送？`)) return;
+  const log = document.getElementById("admin-room-log");
+  if (log) log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>房間推送中…</div>`;
+  try {
+    const res = await apiFetch("/api/room/publish", {
+      method: "POST",
+      body: JSON.stringify({ roomCode, limit, message })
+    });
+    if (!res.ok) throw new Error(res.error || "推送失敗");
+    toast(`房間 ${roomCode}：已推送 ${res.published}/${res.total} 人`, "ok");
+    if (log) log.innerHTML = `<div class="sbox show ok">房間 ${escapeHtml(roomCode)} 推送完成 · ${res.published}/${res.total} 人</div>`;
+    loadAdminPushDashboard();
+  } catch (e) {
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminCloseRoom(roomCode) {
+  if (!confirm(`關閉房間 ${roomCode}？關閉後無法再加入。`)) return;
+  const log = document.getElementById("admin-room-log");
+  try {
+    const res = await apiFetch("/api/room/close", {
+      method: "POST",
+      body: JSON.stringify({ roomCode })
+    });
+    if (!res.ok) throw new Error(res.error || "關閉失敗");
+    toast(`房間 ${roomCode} 已關閉`, "ok");
+    loadAdminPushDashboard();
+  } catch (e) {
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
 }
 
 async function adminPreviewPush(userName) {
