@@ -230,6 +230,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="stat"><span>電影總數</span><span id="s-count">—</span></div>
     <div class="stat"><span>場景標籤</span><span id="s-scenes">—</span></div>
     <div class="stat"><span>類型標籤</span><span id="s-genres">—</span></div>
+    <div class="stat"><span>氛圍標籤</span><span id="s-atmospheres">—</span></div>
   </div>
 </aside>
 
@@ -250,7 +251,11 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <button class="btn btn-sm" onclick="reanalyzeSelectNone()">取消全選</button>
       <button class="btn btn-accent" id="btn-reanalyze-selected" onclick="reanalyzeSelected()" disabled>重新分析已選</button>
       <button class="btn btn-sm" onclick="batchSyncAllYears()">📅 一鍵同步全庫年份</button>
+      <span id="missing-atmosphere-count" style="font-size:12px;color:var(--text3);font-family:'DM Mono',monospace">氛圍缺漏：—</span>
+      <button class="btn btn-sm" onclick="scanMissingAtmospheres()">查缺氛圍</button>
+      <button class="btn btn-accent" id="btn-fill-atmospheres" onclick="fillMissingAtmospheres()">✦ 補齊氛圍標籤</button>
     </div>
+    <div id="fill-atmosphere-log" style="display:none;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:720px;max-height:120px;overflow:auto"></div>
     <div id="batch-sync-year-log" style="display:none;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:'DM Mono',monospace;max-width:720px;max-height:160px;overflow:auto"></div>
     <div id="reanalyze-progress" style="display:none;margin-bottom:16px;max-width:720px">
       <div class="sbox show loading" id="reanalyze-status">
@@ -827,6 +832,7 @@ async function loadDb() {
       updateStats();
       renderList().catch(e => console.error('renderList', e));
       setServerStatus(true);
+      scanMissingAtmospheres().catch(() => {});
     } else {
       setServerStatus(false);
     }
@@ -836,15 +842,18 @@ async function loadDb() {
 }
 
 function updateStats() {
-  const sc = new Set(), gn = new Set();
+  const sc = new Set(), gn = new Set(), atm = new Set();
   db.forEach(m => {
-    (m.scenes||[]).forEach(t=>sc.add(t));
-    (m.genres||[]).forEach(t=>gn.add(t));
-    movieTagTexts(m).forEach(t=>gn.add(t));
+    [...(m.scenes || []), ...(m.scenesMain || []), ...(m.scenesSub || [])].forEach(t => sc.add(t));
+    (m.genres || []).forEach(t => gn.add(t));
+    movieTagTexts(m).forEach(t => gn.add(t));
+    movieAtmospheres(m).forEach(t => atm.add(t));
   });
   document.getElementById('s-count').textContent = db.length;
   document.getElementById('s-scenes').textContent = sc.size;
   document.getElementById('s-genres').textContent = gn.size;
+  const atmEl = document.getElementById('s-atmospheres');
+  if (atmEl) atmEl.textContent = atm.size;
 }
 
 async function checkServer() {
@@ -1356,6 +1365,83 @@ function reanalyzeSelectVisible() {
 function reanalyzeSelectNone() {
   reanalyzeSelectedIds.clear();
   renderList();
+}
+
+let atmosphereFillRunning = false;
+
+async function scanMissingAtmospheres() {
+  const el = document.getElementById('missing-atmosphere-count');
+  try {
+    const r = await apiFetch('/api/admin/missing-atmospheres');
+    if (!r.ok) throw new Error(r.error || '查詢失敗');
+    if (el) el.textContent = `氛圍缺漏：${r.count} 部`;
+    return r;
+  } catch (e) {
+    if (el) el.textContent = '氛圍缺漏：?';
+    return null;
+  }
+}
+
+async function fillMissingAtmospheres() {
+  if (atmosphereFillRunning) {
+    toast('氛圍補齊執行中…');
+    return;
+  }
+  const scan = await scanMissingAtmospheres();
+  const missing = scan?.count || 0;
+  if (!missing) {
+    toast('全庫已有氛圍標籤', 'ok');
+    return;
+  }
+  if (!confirm(`共有 ${missing} 部電影缺少氛圍標籤。\n將先嘗試 Gemini 生成，失敗則依類型／場景自動推估（每次 15 部），是否開始？`)) return;
+
+  atmosphereFillRunning = true;
+  const btn = document.getElementById('btn-fill-atmospheres');
+  const log = document.getElementById('fill-atmosphere-log');
+  if (btn) btn.disabled = true;
+  if (log) {
+    log.style.display = 'block';
+    log.innerHTML = '<div class="sbox show loading"><span class="spin"></span> 開始補齊氛圍標籤…</div>';
+  }
+
+  let remaining = missing;
+  let totalFilled = 0;
+  let rounds = 0;
+  const maxRounds = Math.ceil(missing / 15) + 2;
+
+  try {
+    while (remaining > 0 && rounds < maxRounds) {
+      rounds++;
+      const r = await apiFetch('/api/admin/fill-atmospheres', {
+        method: 'POST',
+        body: JSON.stringify({ limit: 15, mode: 'auto' })
+      });
+      if (!r.ok) throw new Error(r.error || '補齊失敗');
+      totalFilled += r.filled || 0;
+      remaining = r.remaining ?? 0;
+      const lines = (r.results || []).slice(-5).map(x =>
+        x.ok
+          ? `✓ ${x.title}（${(x.atmospheres || []).join('、') || x.count + ' 個'}）`
+          : `✗ ${x.title}：${x.error || '失敗'}`
+      );
+      if (log) {
+        log.innerHTML = `<div class="sbox show ok">第 ${rounds} 批 · 已補 ${totalFilled} 部 · 尚缺 ${remaining} 部</div>`
+          + lines.map(l => `<div style="margin-top:4px">${escapeHtml(l)}</div>`).join('');
+      }
+      const cnt = document.getElementById('missing-atmosphere-count');
+      if (cnt) cnt.textContent = `氛圍缺漏：${remaining} 部`;
+      if ((r.processed || 0) === 0) break;
+      await new Promise(res => setTimeout(res, 800));
+    }
+    toast(`氛圍標籤補齊完成：${totalFilled} 部，尚缺 ${remaining} 部`, remaining ? 'err' : 'ok');
+    await loadDb();
+  } catch (e) {
+    toast('補齊失敗：' + e.message, 'err');
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  } finally {
+    atmosphereFillRunning = false;
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function reanalyzeOne(id) {

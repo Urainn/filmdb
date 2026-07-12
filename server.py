@@ -1256,6 +1256,213 @@ def normalize_emotion_fields(record: dict) -> dict:
     return record
 
 
+def movies_missing_atmospheres(movies=None) -> list[dict]:
+    movies = movies if movies is not None else db_read()
+    missing = []
+    for m in movies:
+        _, atmospheres = movie_emotion_atmosphere_tags(m)
+        if not atmospheres:
+            missing.append(m)
+    return missing
+
+
+_GENRE_ATMOSPHERE_MAP = {
+    "恐怖": ["黑暗", "陰森", "壓抑", "詭譎"],
+    "驚悚": ["陰暗", "緊繃", "詭譎", "潮濕"],
+    "懸疑": ["神秘", "陰鬱", "冷冽", "詭譎"],
+    "科幻": ["未來感", "霓虹", "冷冽", "金屬感"],
+    "奇幻": ["夢幻", "超現實", "迷幻", "華麗"],
+    "愛情": ["浪漫", "柔和", "溫暖", "細膩"],
+    "浪漫": ["浪漫", "柔和", "溫暖", "細膩"],
+    "喜劇": ["明亮", "輕快", "活潑", "繽紛"],
+    "動作": ["硬派", "緊湊", "熱血", "粗獷"],
+    "戰爭": ["肅殺", "硝煙", "沉重", "壯闊"],
+    "古裝": ["古風", "厚重", "東方美學", "寫實"],
+    "武俠": ["江湖", "古風", "飄逸", "寫實"],
+    "犯罪": ["陰暗", "寫實", "冷冽", "頹廢"],
+    "紀錄": ["寫實", "生活化", "自然光", "紀實感"],
+    "動畫": ["繽紛", "夢幻", "童趣", "明亮"],
+    "音樂": ["華麗", "節奏感", "舞台感", "熱烈"],
+    "家庭": ["溫馨", "日常", "柔和", "治癒"],
+    "青春": ["清新", "明亮", "校園感", "青澀"],
+}
+
+_SCENE_ATMOSPHERE_HINTS = [
+    "雨夜", "霓虹", "復古", "潮濕", "炎熱", "雪國", "海邊", "都市", "鄉村",
+    "密室", "廢墟", "太空", "森林", "監獄", "醫院", "學校", "酒吧", "教堂",
+]
+
+_EMOTION_NOT_ATMOSPHERE = {
+    "感動", "緊張", "興奮", "害怕", "快樂", "悲傷", "憤怒", "驚喜", "無聊",
+}
+
+
+def heuristic_atmospheres_for_movie(movie: dict) -> list[str]:
+    """Fallback atmosphere tags from genres, scenes, and title/desc keywords."""
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def add(term: str):
+        t = to_traditional_text(str(term).strip())
+        if not t or t in seen or t in _EMOTION_NOT_ATMOSPHERE:
+            return
+        seen.add(t)
+        found.append(t)
+
+    genres = movie.get("genres") or []
+    for g in genres:
+        gs = str(g)
+        for key, tags in _GENRE_ATMOSPHERE_MAP.items():
+            if key in gs:
+                for t in tags:
+                    add(t)
+
+    scenes = list(movie.get("scenesMain") or []) + list(movie.get("scenesSub") or []) + list(movie.get("scenes") or [])
+    for sc in scenes:
+        ss = str(sc)
+        for hint in _SCENE_ATMOSPHERE_HINTS:
+            if hint in ss:
+                add(hint)
+
+    blob = " ".join([
+        str(movie.get("title") or ""),
+        str(movie.get("desc") or ""),
+        " ".join(genres),
+        " ".join(scenes),
+    ])
+    for hint in _SCENE_ATMOSPHERE_HINTS:
+        if hint in blob:
+            add(hint)
+
+    if len(found) < 4:
+        for t in ["寫實", "電影感", "敘事感", "沉浸"]:
+            add(t)
+            if len(found) >= 4:
+                break
+    return found[:8]
+
+
+def call_gemini_atmospheres_for_movie(movie: dict) -> dict:
+    """Generate atmosphere tags from existing movie metadata (text-only, no video)."""
+    emotions, existing = movie_emotion_atmosphere_tags(movie)
+    if existing:
+        return {"ok": True, "atmospheres": existing, "skipped": True}
+
+    scenes_main = movie.get("scenesMain") or []
+    scenes_sub = movie.get("scenesSub") or []
+    if not scenes_main and not scenes_sub:
+        scenes_main = movie.get("scenes") or []
+
+    text_prompt = f"""請根據以下電影資料，只輸出氛圍標籤 JSON（不要 markdown、不要說明）。
+片名：{movie.get("title", "")}
+簡介：{movie.get("desc", "")}
+類型：{", ".join(movie.get("genres") or [])}
+情緒：{", ".join(emotions)}
+主要場景：{", ".join(scenes_main)}
+次要場景：{", ".join(scenes_sub)}
+
+只輸出：
+{{"atmospheres": ["4到8個氛圍標籤，描述畫面與聽覺的整體質感"]}}
+
+規則：
+1. 只填氛圍與視聽質感（如：黑暗、夢幻、復古、壓抑、華麗、詭譎、霓虹、潮濕、寫實）
+2. 不要情緒詞（如感動、緊張、興奮）
+3. 不要類型詞（如喜劇、恐怖、愛情）
+4. 繁體中文，去重"""
+
+    payload = {
+        "contents": [{"parts": [{"text": text_prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 1024,
+            "responseMimeType": "application/json",
+        },
+    }
+    out = gemini_generate_with_retry(payload, timeout=90)
+    if not out.get("ok"):
+        return out
+    data = out.get("data") or {}
+    atmospheres = data.get("atmospheres") or []
+    if isinstance(atmospheres, str):
+        atmospheres = [x.strip() for x in re.split(r"[,，、]", atmospheres) if x.strip()]
+    atmospheres = [to_traditional_text(x) for x in atmospheres if str(x).strip()]
+    if not atmospheres:
+        return {"ok": False, "error": "Gemini 未回傳氛圍標籤"}
+    return {"ok": True, "atmospheres": atmospheres, "model": out.get("model")}
+
+
+def save_movie_atmospheres(movie: dict, atmospheres: list[str]) -> dict:
+    row_num = db_find_row(movie.get("id"))
+    if not row_num:
+        raise ValueError("找不到電影列")
+    updated = dict(movie)
+    updated["atmospheres"] = [str(x).strip() for x in atmospheres if str(x).strip()]
+    normalize_emotion_fields(updated)
+    db_update_row(row_num, updated)
+    return updated
+
+
+def fill_missing_atmospheres(limit=20, movie_ids=None, allow_heuristic=True, mode="auto") -> dict:
+    missing = movies_missing_atmospheres()
+    if movie_ids:
+        id_set = {str(x).strip() for x in movie_ids if str(x).strip()}
+        missing = [m for m in missing if m.get("id") in id_set]
+    batch = missing[: max(1, min(int(limit or 20), 100))]
+    results = []
+    filled = 0
+    for m in batch:
+        title = m.get("title") or m.get("id") or "?"
+        try:
+            _, existing = movie_emotion_atmosphere_tags(m)
+            if existing:
+                results.append({"id": m.get("id"), "title": title, "ok": True, "skipped": True, "count": len(existing)})
+                continue
+
+            source = "gemini"
+            atmospheres: list[str] = []
+            if mode == "heuristic":
+                atmospheres = heuristic_atmospheres_for_movie(m)
+                source = "heuristic"
+            else:
+                gen = call_gemini_atmospheres_for_movie(m)
+                if gen.get("ok") and not gen.get("skipped"):
+                    atmospheres = gen.get("atmospheres") or []
+                elif allow_heuristic and mode != "gemini":
+                    atmospheres = heuristic_atmospheres_for_movie(m)
+                    source = "heuristic"
+                elif gen.get("skipped"):
+                    results.append({"id": m.get("id"), "title": title, "ok": True, "skipped": True, "count": len(gen.get("atmospheres") or [])})
+                    continue
+                else:
+                    results.append({"id": m.get("id"), "title": title, "ok": False, "error": gen.get("error")})
+                    continue
+
+            if not atmospheres:
+                results.append({"id": m.get("id"), "title": title, "ok": False, "error": "無法產生氛圍標籤"})
+                continue
+
+            save_movie_atmospheres(m, atmospheres)
+            filled += 1
+            results.append({
+                "id": m.get("id"),
+                "title": title,
+                "ok": True,
+                "source": source,
+                "count": len(atmospheres),
+                "atmospheres": atmospheres,
+            })
+        except Exception as e:
+            results.append({"id": m.get("id"), "title": title, "ok": False, "error": str(e)})
+    remaining = len(movies_missing_atmospheres())
+    return {
+        "ok": True,
+        "processed": len(batch),
+        "filled": filled,
+        "remaining": remaining,
+        "results": results,
+    }
+
+
 def normalize_analysis_result(result):
     for key in ["title", "desc", "scenes_main", "scenes_sub", "genres", "emotions", "atmospheres", "moods", "cast"]:
         if key in result:
@@ -1863,6 +2070,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json(500, {"ok": False, "error": str(e)})
 
+        elif path == "/api/admin/missing-atmospheres":
+            try:
+                missing = movies_missing_atmospheres()
+                preview = [
+                    {"id": m.get("id"), "title": m.get("title") or ""}
+                    for m in missing[:30]
+                ]
+                self.send_json(200, {
+                    "ok": True,
+                    "count": len(missing),
+                    "totalMovies": len(db_read()),
+                    "preview": preview,
+                })
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+
         elif path == "/api/sync/pull":
             qs = parse_query_string(self.path)
             body = {
@@ -2015,6 +2238,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(404, {"ok": False, "error": err})
                 return
             self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+            return
+
+        if path == "/api/admin/fill-atmospheres":
+            limit = int(body.get("limit") or 20)
+            movie_ids = body.get("movieIds") or body.get("ids")
+            allow_heuristic = body.get("allowHeuristic", True) is not False
+            mode = (body.get("mode") or "auto").strip().lower()
+            try:
+                self.send_json(200, fill_missing_atmospheres(
+                    limit=limit, movie_ids=movie_ids, allow_heuristic=allow_heuristic, mode=mode
+                ))
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
             return
 
         # ========== 後台：同步過期推薦 ==========
