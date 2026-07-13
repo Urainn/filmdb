@@ -16,7 +16,16 @@ import time
 import threading
 import base64
 import sys
+import ssl
 import traceback
+
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    _SSL_CONTEXT = ssl.create_default_context()
+
+ssl._create_default_https_context = lambda *a, **k: _SSL_CONTEXT
 
 from recommend_engine import (
     DEFAULT_WEIGHTS,
@@ -83,8 +92,13 @@ YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7w
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
 
 
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-MODEL_FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+MODEL_FALLBACKS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-1.5-flash",
+]
 
 
 PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物件，絕對不要加任何說明文字或 markdown。
@@ -301,6 +315,29 @@ def save_search_synonym_groups(groups) -> bool:
         with _search_synonyms_lock:
             _search_synonyms_cache = normalized
     return ok
+
+
+def is_valid_gemini_api_key(key: str) -> bool:
+    """Accept legacy AIza keys and new AQ. auth keys from Google AI Studio."""
+    k = (key or "").strip()
+    if not k or len(k) < 20:
+        return False
+    if k.startswith("AIza") and re.fullmatch(r"AIza[A-Za-z0-9_-]+", k):
+        return True
+    if k.startswith("AQ.") and re.fullmatch(r"AQ\.[A-Za-z0-9._-]+", k):
+        return True
+    return False
+
+
+def mask_gemini_api_key(key: str) -> str:
+    k = (key or "").strip()
+    if not k:
+        return ""
+    if k.startswith("AQ.") and len(k) > 16:
+        return k[:10] + "..." + k[-4:]
+    if len(k) > 12:
+        return k[:8] + "..." + k[-4:]
+    return k[:4] + "..."
 
 
 def get_gemini_keys():
@@ -1645,6 +1682,73 @@ def resolve_movie_poster(movie):
     return ""
 
 
+def parse_gemini_quota_info(err_text: str) -> dict | None:
+    """Parse Google 429/quota errors into clearer user-facing labels."""
+    text = err_text or ""
+    low = text.lower()
+    if ("quota" not in low and "exceeded" not in low
+            and "prepayment credits" not in low and '"code": 429' not in text):
+        return None
+
+    if "prepayment credits" in low or "credits are depleted" in low:
+        return {
+            "quotaKind": "prepay",
+            "quotaLimit": None,
+            "model": None,
+            "label": "預付額度用完",
+            "detail": (
+                "此專案的預付額度（prepayment credits）已用完。"
+                "請到 Google AI Studio → 專案 / Billing 儲值，"
+                "或改用其他仍有額度的 Key。"
+            ),
+        }
+
+    limit = None
+    model = None
+    m_limit = re.search(r"limit:\s*(\d+)", text, re.I)
+    if m_limit:
+        limit = int(m_limit.group(1))
+    m_model = re.search(r"model:\s*([\w.-]+)", text, re.I)
+    if m_model:
+        model = m_model.group(1)
+    model_note = f"（{model}）" if model else ""
+
+    if limit == 0:
+        return {
+            "quotaKind": "zero",
+            "quotaLimit": 0,
+            "model": model,
+            "label": "額度未開通",
+            "detail": (
+                "此 Google Cloud 專案的免費額度為 0（limit: 0）。"
+                "請到 Google AI Studio → Set up billing 綁定帳單以啟用免費層"
+                "（通常不會扣款），或建立新的支援地區專案。"
+            ),
+        }
+    if limit and limit > 0:
+        return {
+            "quotaKind": "exhausted",
+            "quotaLimit": limit,
+            "model": model,
+            "label": "今日額度已用完",
+            "detail": (
+                f"免費層每日約 {limit} 次{model_note}已用完。"
+                "同一專案的多把 Key 共用額度，換新 Key 不會重置。"
+                "請明天再試、建立新專案，或到 AI Studio 升級方案。"
+            ),
+        }
+    return {
+        "quotaKind": "unknown",
+        "quotaLimit": None,
+        "model": model,
+        "label": "額度受限",
+        "detail": (
+            "Gemini API 配額不足或已超限。"
+            "請到 ai.dev/rate-limit 查看用量，或在 AI Studio 檢查配額/帳單。"
+        ),
+    }
+
+
 def gemini_friendly_error(raw):
     text = raw or ""
     low = text.lower()
@@ -1654,10 +1758,13 @@ def gemini_friendly_error(raw):
             "請在 Google AI Studio 建立新的 API Key（建議美國/支援地區），"
             "並在網站「API Key 設定」更新。"
         )
-    if "quota" in low or "exceeded" in low or '"code": 429' in text:
+    qinfo = parse_gemini_quota_info(text)
+    if qinfo:
+        return qinfo["detail"]
+    if "generativelanguage.googleapis.com" in low and "has not been used" in low:
         return (
-            "Gemini API 配額已用完或免費額度為 0。"
-            "請到 Google AI Studio 檢查配額/帳單，或新增可用的 API Key 後在網站更新。"
+            "此 Key 的 Google Cloud 專案尚未啟用 Generative Language API。"
+            "請到 GCP Console 啟用 Gemini API 後再試。"
         )
     return text[:400]
 
@@ -1702,13 +1809,16 @@ def gemini_models_to_try():
 def gemini_http_post(payload, api_key, model, timeout=120):
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
+        f"{model}:generateContent"
     )
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
         method="POST",
     )
     try:
@@ -1719,6 +1829,166 @@ def gemini_http_post(payload, api_key, model, timeout=120):
         return e.code, None, err_text
     except Exception as e:
         return 0, None, str(e)
+
+
+def classify_gemini_probe_error(status: int, err_text: str) -> dict:
+    err_low = (err_text or "").lower()
+    if status == 200:
+        return {"status": "ok", "label": "可用", "detail": "連線正常"}
+    if status == 429 or "quota" in err_low or "exceeded" in err_low:
+        qinfo = parse_gemini_quota_info(err_text)
+        if qinfo:
+            return {"status": "quota", **qinfo}
+        return {"status": "quota", "label": "額度用盡", "detail": gemini_friendly_error(err_text)}
+    if "location is not supported" in err_low:
+        return {"status": "region", "label": "地區不可用", "detail": gemini_friendly_error(err_text)}
+    if "leaked" in err_low:
+        return {"status": "leaked", "label": "Key 外洩", "detail": "請刪除此 Key 並建立新 Key"}
+    if status == 403:
+        return {"status": "denied", "label": "專案被拒", "detail": gemini_friendly_error(err_text)}
+    if status == 404:
+        if "no longer available" in err_low:
+            return {
+                "status": "model",
+                "label": "模型停用",
+                "detail": "此模型對新帳號已停用，系統會自動嘗試其他模型。",
+            }
+        return {"status": "error", "label": "模型不存在", "detail": gemini_friendly_error(err_text)}
+    return {"status": "error", "label": "錯誤", "detail": gemini_friendly_error(err_text or f"HTTP {status}")}
+
+
+def probe_gemini_key(api_key: str, model: str | None = None) -> dict:
+    models = [model] if model else gemini_models_to_try()
+    payload = {
+        "contents": [{"parts": [{"text": "reply ok"}]}],
+        "generationConfig": {"maxOutputTokens": 8},
+    }
+    masked = mask_gemini_api_key(api_key)
+    base = {
+        "masked": masked,
+        "suffix": api_key[-6:] if len(api_key) >= 6 else api_key,
+    }
+
+    quota_result = None
+    last = {"httpStatus": 0, "model": models[0], "usable": False, "status": "error", "label": "錯誤", "detail": "無法連線"}
+
+    for m in models:
+        status, data, err_text = gemini_http_post(payload, api_key, m, timeout=20)
+        info = classify_gemini_probe_error(status, err_text or "")
+        row = {**base, "httpStatus": status, "model": m, "usable": status == 200, **info}
+        last = row
+
+        if status == 200:
+            return row
+
+        st = info.get("status")
+        if st == "quota":
+            quota_result = row
+            break
+        if st in ("region", "leaked", "denied"):
+            return row
+        if status == 404:
+            continue
+
+    if quota_result:
+        return quota_result
+    return last
+
+
+def probe_external_api(name: str, url: str) -> dict:
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return {"name": name, "status": "ok", "label": "可用", "httpStatus": resp.status, "detail": "連線正常"}
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        err_low = body.lower()
+        if e.code == 403 and "quota" in err_low:
+            return {"name": name, "status": "quota", "label": "額度用盡", "httpStatus": e.code, "detail": body[:200]}
+        return {"name": name, "status": "error", "label": "錯誤", "httpStatus": e.code, "detail": body[:200]}
+    except Exception as e:
+        return {"name": name, "status": "error", "label": "錯誤", "httpStatus": 0, "detail": str(e)}
+
+
+def check_all_api_quotas() -> dict:
+    keys = get_gemini_keys()
+    gemini_results = [probe_gemini_key(k) for k in keys]
+    summary = {"ok": 0, "quota": 0, "region": 0, "leaked": 0, "denied": 0, "error": 0}
+    for row in gemini_results:
+        key = row.get("status") or "error"
+        summary[key] = summary.get(key, 0) + 1
+
+    tmdb_url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query=test"
+    yt_url = (
+        f"https://www.googleapis.com/youtube/v3/search?part=snippet&type=video"
+        f"&q=test&maxResults=1&key={YOUTUBE_API_KEY}"
+    )
+    return {
+        "ok": True,
+        "checkedAt": utc_now(),
+        "gemini": {
+            "count": len(keys),
+            "usable": summary.get("ok", 0),
+            "summary": summary,
+            "keys": gemini_results,
+        },
+        "tmdb": probe_external_api("TMDB", tmdb_url),
+        "youtube": probe_external_api("YouTube", yt_url),
+    }
+
+
+def prune_unusable_gemini_keys() -> dict:
+    """Probe all keys, remove unusable ones from Sheets config, keep only working keys."""
+    global _key_index
+    keys = get_gemini_keys()
+    if not keys:
+        return {"ok": True, "removed": 0, "kept": 0, "removedKeys": [], "keptKeys": []}
+
+    kept_keys: list[str] = []
+    removed_rows: list[dict] = []
+    kept_rows: list[dict] = []
+
+    for api_key in keys:
+        probe = probe_gemini_key(api_key)
+        row = {
+            "masked": probe.get("masked"),
+            "suffix": probe.get("suffix"),
+            "label": probe.get("label"),
+        }
+        if probe.get("usable"):
+            kept_keys.append(api_key)
+            kept_rows.append(row)
+        else:
+            removed_rows.append({**row, "reason": probe.get("detail") or probe.get("label")})
+
+    if not removed_rows:
+        return {
+            "ok": True,
+            "removed": 0,
+            "kept": len(kept_keys),
+            "removedKeys": [],
+            "keptKeys": kept_rows,
+            "message": "沒有需要移除的 Key",
+        }
+
+    ok = save_gemini_keys(kept_keys)
+    if ok:
+        with _key_lock:
+            _key_index = 0
+
+    return {
+        "ok": ok,
+        "removed": len(removed_rows),
+        "kept": len(kept_keys),
+        "removedKeys": removed_rows,
+        "keptKeys": kept_rows,
+        "message": (
+            f"已移除 {len(removed_rows)} 組無用 Key，保留 {len(kept_keys)} 組"
+            if ok
+            else "儲存失敗，Key 未變更"
+        ),
+        "error": None if ok else "儲存 Gemini Keys 失敗",
+    }
 
 
 def gemini_parse_candidate(data):
@@ -2146,8 +2416,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(404, {"ok": False, "error": "admin_push.html not found"})
         elif path == "/config/keys":
             keys = get_gemini_keys()
-            masked = [k[:8] + "..." + k[-4:] if len(k) > 12 else k[:4] + "..." for k in keys]
+            masked = [mask_gemini_api_key(k) for k in keys]
             self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
+        elif path == "/config/keys/check":
+            try:
+                self.send_json(200, check_all_api_quotas())
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
         elif path == "/api/search/synonyms":
             qs = parse_query_string(self.path)
             if qs.get("defaults") in ("1", "true", "yes"):
@@ -2410,6 +2685,11 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_save_keys(body)
         elif path == "/config/keys/add":
             self.handle_add_key(body)
+        elif path == "/config/keys/prune":
+            try:
+                self.send_json(200, prune_unusable_gemini_keys())
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
         elif path == "/youtube/search":
             self.handle_youtube_search(body)
         elif path == "/youtube/info":
@@ -2479,7 +2759,10 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(keys, list) or not keys:
             self.send_json(400, {"ok": False, "error": "請提供 keys 陣列"})
             return
-        keys = [k.strip() for k in keys if k.strip()]
+        keys = [k.strip() for k in keys if k.strip() and is_valid_gemini_api_key(k)]
+        if not keys:
+            self.send_json(400, {"ok": False, "error": "請提供有效的 Gemini API Key（AIza… 或 AQ.…）"})
+            return
         ok = save_gemini_keys(keys)
         self.send_json(200, {"ok": ok, "count": len(keys)} if ok else {"ok": False, "error": "儲存失敗"})
 
@@ -2493,11 +2776,11 @@ class Handler(BaseHTTPRequestHandler):
         new_keys = []
         for key in incoming:
             key = str(key).strip()
-            if key.startswith("AIza") and key not in new_keys:
+            if is_valid_gemini_api_key(key) and key not in new_keys:
                 new_keys.append(key)
 
         if not new_keys:
-            self.send_json(400, {"ok": False, "error": "請提供有效的 Gemini API Key"})
+            self.send_json(400, {"ok": False, "error": "請提供有效的 Gemini API Key（AIza… 或 AQ.…）"})
             return
 
         existing = [k.strip() for k in get_gemini_keys() if k.strip()]

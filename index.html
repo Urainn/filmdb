@@ -639,7 +639,11 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
         <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">目前 Key 狀態</div>
         <div style="font-size:11px;color:var(--text2);margin-bottom:12px">每組 Key 每天可分析約 500 部電影（免費方案）</div>
-        <div id="keys-status" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text3)">載入中...</div>
+        <div class="btn-row" style="margin-bottom:10px">
+          <button class="btn btn-sm" id="btn-check-keys" onclick="loadKeyStatus(true)">↻ 重新檢測</button>
+          <button class="btn btn-sm btn-danger" id="btn-prune-keys" onclick="pruneUnusableKeys()">🗑 移除無用 Key</button>
+        </div>
+        <div id="keys-status" style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text3)">載入中…</div>
       </div>
 
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px">
@@ -652,7 +656,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <div class="field">
           <label class="fl">追加單筆 Gemini API Key</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <input class="fi" id="key-add-input" type="text" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX" style="flex:1;min-width:260px">
+            <input class="fi" id="key-add-input" type="text" placeholder="AIza… 或 AQ.…（新版 Auth Key）" style="flex:1;min-width:260px">
             <button class="btn btn-accent" onclick="addKey()">新增 Key</button>
           </div>
           <div style="font-size:10.5px;color:var(--text3);margin-top:3px">這裡會追加到現有清單，不會取代舊 Key</div>
@@ -660,13 +664,13 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
 
         <div class="field">
           <label class="fl">Gemini API Keys（每行一組）</label>
-          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXXXXXXXXXXXXXXXXX&#10;AIzaYYYYYYYYYYYYYYYYYYYYYYY&#10;AIzaZZZZZZZZZZZZZZZZZZZZZZZ"></textarea>
-          <div style="font-size:10.5px;color:var(--text3);margin-top:3px">儲存後舊的 Key 會被取代，請確認每行都是完整的 Key</div>
+          <textarea class="fta" id="keys-input" rows="5" placeholder="AIzaXXXXXXXX 或 AQ.Ab8RN6L…（每行一組）"></textarea>
+          <div style="font-size:10.5px;color:var(--text3);margin-top:3px">支援舊版 AIza 與新版 AQ. Auth Key；儲存後舊的 Key 會被取代</div>
         </div>
 
         <div class="btn-row">
           <button class="btn btn-accent" onclick="saveKeys()">儲存 Keys</button>
-          <button class="btn btn-sm" onclick="loadKeyStatus()">重新整理狀態</button>
+          <button class="btn btn-sm" onclick="loadKeyStatus(true)">重新檢測</button>
         </div>
         <div class="sbox" id="keys-save-status" style="margin-top:10px"></div>
       </div>
@@ -2680,8 +2684,16 @@ function ytItemUrl(item) {
 
 function formatAnalyzeError(err) {
   const s = String(err || '');
-  if (s.includes('配額') || s.includes('quota') || s.includes('429'))
-    return 'Gemini API 配額用盡。請到 Google AI Studio 檢查配額，或在網站「API Key 設定」換新的 Key。';
+  if (/limit:\s*0\b/i.test(s) || s.includes('額度未開通'))
+    return '免費額度未開通（limit: 0）。請到 Google AI Studio → Set up billing 綁定帳單以啟用免費層。';
+  const mLimit = s.match(/limit:\s*(\d+)/i);
+  if (s.includes('429') || s.includes('quota') || s.includes('配額') || s.includes('額度')) {
+    if (mLimit && parseInt(mLimit[1], 10) > 0)
+      return `今日免費額度已用完（每日約 ${mLimit[1]} 次）。同一專案共用額度，請明天再試或建立新專案。`;
+    if (s.includes('今日額度已用完') || s.includes('免費層每日約'))
+      return s.length > 220 ? s.slice(0, 220) + '…' : s;
+    return 'Gemini API 配額不足。請到 ai.dev/rate-limit 查看用量，或到「API Key 設定」檢查 Key 狀態。';
+  }
   if (s.includes('location is not supported') || s.includes('地區不可用') || s.includes('地區受限'))
     return 'Gemini Key 地區受限。請在 Google AI Studio 建立新 Key，並在網站「API Key 設定」更新。';
   if (s.includes('所有 Gemini Key'))
@@ -2830,33 +2842,130 @@ async function ytBatchAnalyze() {
 // =====================================================================
 // API KEY 設定功能
 // =====================================================================
-async function loadKeyStatus() {
+function keyUsableBadge(usable) {
+  return usable
+    ? '<span style="color:var(--accent);font-weight:600;margin-left:8px">✓ 可用</span>'
+    : '<span style="color:var(--red);font-weight:600;margin-left:8px">✗ 不可用</span>';
+}
+
+function renderKeyProbeResult(r) {
   const el = document.getElementById('keys-status');
+  if (!el || !r) return;
+  const g = r.gemini || {};
+  const lines = [];
+
+  if (!g.count) {
+    el.innerHTML = '<div class="sbox show err">尚未設定任何 Gemini Key</div>';
+    return;
+  }
+
+  lines.push(`<div class="sbox show ${g.usable ? 'ok' : 'err'}" style="margin-bottom:10px;font-family:inherit">`
+    + `<b>Gemini</b>：<span style="color:${g.usable ? 'var(--accent)' : 'var(--red)'}">${g.usable || 0} / ${g.count || 0} 組可用</span>`
+    + (g.count ? ` · 不可用 ${(g.count || 0) - (g.usable || 0)} 組` : '')
+    + `</div>`);
+
+  (g.keys || []).forEach((k, i) => {
+    const usable = k.usable === true || k.status === 'ok';
+    lines.push(`<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px;padding:6px 0;border-bottom:1px solid var(--border)">`
+      + `<span style="color:var(--text2);min-width:42px">Key ${i + 1}</span>`
+      + `<span style="color:var(--text)">${escapeHtml(k.masked || ('…' + (k.suffix || '')))}</span>`
+      + keyUsableBadge(usable)
+      + (usable ? '' : `<span style="width:100%;font-size:10px;color:var(--text3);padding-left:46px">${escapeHtml(k.label || '不可用')}${k.quotaLimit != null ? ` · 上限 ${k.quotaLimit}/日` : ''}${k.detail ? ' · ' + escapeHtml(String(k.detail).slice(0, 100)) : ''}</span>`)
+      + `</div>`);
+  });
+
+  [
+    { title: 'TMDB', data: r.tmdb },
+    { title: 'YouTube', data: r.youtube },
+  ].forEach(({ title, data }) => {
+    if (!data) return;
+    const usable = data.status === 'ok';
+    lines.push(`<div style="padding:6px 0;margin-top:4px">`
+      + `<b>${title}</b> ${keyUsableBadge(usable)}`
+      + (!usable && data.detail ? `<div style="font-size:10px;color:var(--text3);margin-top:2px">${escapeHtml(String(data.detail).slice(0, 100))}</div>` : '')
+      + `</div>`);
+  });
+
+  if (r.checkedAt) {
+    lines.push(`<div style="margin-top:8px;font-size:10px;color:var(--text3)">檢測：${escapeHtml(r.checkedAt.replace('T', ' ').replace('Z', ' UTC'))}</div>`);
+  }
+  el.innerHTML = lines.join('');
+}
+
+async function loadKeyStatus(forceCheck = false) {
+  const el = document.getElementById('keys-status');
+  const btn = document.getElementById('btn-check-keys');
   if (!el) return;
   try {
-    const r = await apiFetch('/config/keys');
-    if (r.ok) {
-      if (r.count === 0) {
-        el.textContent = '尚未設定任何 Key';
-        el.style.color = 'var(--red)';
-      } else {
-        el.innerHTML = r.keys.map((k, i) =>
-          `<div style="padding:3px 0;color:var(--accent)">Key ${i+1}：${k}</div>`
-        ).join('') + `<div style="margin-top:6px;color:var(--text2)">共 ${r.count} 組，額度不足時自動切換</div>`;
+    if (forceCheck !== false) {
+      if (btn) btn.disabled = true;
+      el.innerHTML = '<div class="sbox show loading"><span class="spin"></span> 檢測 Key 可用性…</div>';
+      const r = await apiFetch('/config/keys/check');
+      if (!r.ok) throw new Error(r.error || '檢測失敗');
+      renderKeyProbeResult(r);
+      if (forceCheck === true) {
+        const usable = r.gemini?.usable || 0;
+        toast(usable ? `Gemini ${usable} 組可用` : '目前沒有可用的 Gemini Key', usable ? 'ok' : 'err');
       }
+      return;
     }
-  } catch(e) {
-    el.textContent = '無法取得狀態';
+    const r = await apiFetch('/config/keys');
+    if (r.ok && r.count === 0) {
+      el.textContent = '尚未設定任何 Key';
+      el.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
+}
+
+/** @deprecated use loadKeyStatus(true) */
+async function checkAllApiKeys() {
+  return loadKeyStatus(true);
+}
+
+async function pruneUnusableKeys() {
+  const btn = document.getElementById('btn-prune-keys');
+  const el = document.getElementById('keys-status');
+  if (!confirm('將檢測並永久刪除所有「不可用」的 Gemini Key，只保留可用者。\n\n確定繼續？')) return;
+  if (btn) btn.disabled = true;
+  if (el) el.innerHTML = '<div class="sbox show loading"><span class="spin"></span> 檢測並移除無用 Key…（約需數十秒）</div>';
+  try {
+    const r = await apiFetch('/config/keys/prune', { method: 'POST', body: '{}' });
+    if (!r.ok) throw new Error(r.error || r.message || '移除失敗');
+    const removed = r.removed || 0;
+    const kept = r.kept || 0;
+    if (removed === 0) {
+      toast(r.message || '沒有需要移除的 Key', 'ok');
+    } else {
+      toast(`已移除 ${removed} 組，保留 ${kept} 組`, kept ? 'ok' : 'err');
+    }
+    await loadKeyStatus(true);
+  } catch (e) {
+    toast('移除失敗：' + e.message, 'err');
+    if (el) el.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function isValidGeminiKey(key) {
+  const k = String(key || '').trim();
+  if (!k || k.length < 20) return false;
+  if (/^AIza[A-Za-z0-9_-]+$/.test(k)) return true;
+  if (/^AQ\.[A-Za-z0-9._-]+$/.test(k)) return true;
+  return false;
 }
 
 async function addKey() {
   const inp = document.getElementById('key-add-input');
   const st = document.getElementById('keys-save-status');
   const key = (inp?.value || '').trim();
-  if (!key.startsWith('AIza')) {
+  if (!isValidGeminiKey(key)) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
+    st.textContent = '✗ 請輸入有效的 Key（AIza… 或 AQ.… 開頭）';
     return;
   }
 
@@ -2881,12 +2990,12 @@ async function addKey() {
 
 async function saveKeys() {
   const raw = document.getElementById('keys-input').value.trim();
-  const keys = raw.split('\n').map(k => k.trim()).filter(k => k.startsWith('AIza'));
+  const keys = raw.split('\n').map(k => k.trim()).filter(k => isValidGeminiKey(k));
   const st = document.getElementById('keys-save-status');
 
   if (keys.length === 0) {
     st.className = 'sbox show err';
-    st.textContent = '✗ 請輸入有效的 Key（以 AIza 開頭）';
+    st.textContent = '✗ 請輸入有效的 Key（AIza… 或 AQ.… 開頭）';
     return;
   }
 
