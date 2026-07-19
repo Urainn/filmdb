@@ -307,6 +307,39 @@ def read_config_rows():
         return []
 
 
+def get_config_text(key: str, default: str = "") -> str:
+    want = str(key or "").strip()
+    if not want:
+        return default
+    for row in read_config_rows():
+        if len(row) >= 2 and str(row[0]).strip() == want and str(row[1]).strip():
+            return str(row[1]).strip()
+    return default
+
+
+def set_config_text(key: str, value: str) -> bool:
+    """Upsert a plain A:B text row in the config sheet without wiping other keys."""
+    want = str(key or "").strip()
+    if not want:
+        return False
+    try:
+        ensure_config_sheet()
+        rows = read_config_rows()
+        other = [r for r in rows if not (r and str(r[0]).strip() == want)]
+        text = str(value or "").strip()
+        if text:
+            other.append([want, text])
+        clear_range = urllib.parse.quote(f"{CONFIG_SHEET}!A:Z")
+        sheets_request("POST", f"/values/{clear_range}:clear", {})
+        if other:
+            start = urllib.parse.quote(f"{CONFIG_SHEET}!A1")
+            sheets_request("PUT", f"/values/{start}?valueInputOption=RAW", {"values": other})
+        return True
+    except Exception as e:
+        print(f"  set_config_text({key}) 錯誤: {e}")
+        return False
+
+
 def get_config_json(key: str, default):
     for row in read_config_rows():
         if len(row) >= 2 and row[0] == key and row[1].strip():
@@ -315,6 +348,35 @@ def get_config_json(key: str, default):
             except Exception:
                 return default
     return default
+
+
+def get_email_settings():
+    """
+    Email settings: Google Sheets config tab overrides env.
+    Keys in sheet (column A / B):
+      mail_webhook_url, mail_webhook_secret  ← Apps Script（可寄任意收件人）
+      resend_api_key, resend_from_email
+      app_login_url
+      gmail_smtp_user, gmail_smtp_password, gmail_from_name  (local only; Render blocks SMTP)
+    """
+    resend_key = get_config_text("resend_api_key") or RESEND_API_KEY
+    resend_from = get_config_text("resend_from_email") or RESEND_FROM_EMAIL
+    gmail_user = get_config_text("gmail_smtp_user") or GMAIL_SMTP_USER
+    gmail_pass = "".join(get_config_text("gmail_smtp_password").split()) or GMAIL_SMTP_PASSWORD
+    gmail_name = get_config_text("gmail_from_name") or GMAIL_FROM_NAME or "FilmDB"
+    login_url = get_config_text("app_login_url") or APP_LOGIN_URL
+    webhook_url = get_config_text("mail_webhook_url")
+    webhook_secret = get_config_text("mail_webhook_secret")
+    return {
+        "mail_webhook_url": webhook_url.strip(),
+        "mail_webhook_secret": webhook_secret.strip(),
+        "resend_api_key": resend_key.strip(),
+        "resend_from_email": resend_from.strip(),
+        "gmail_smtp_user": gmail_user.strip(),
+        "gmail_smtp_password": gmail_pass,
+        "gmail_from_name": (gmail_name or "FilmDB").strip() or "FilmDB",
+        "app_login_url": login_url.strip(),
+    }
 
 
 def set_config_json(key: str, value) -> bool:
@@ -813,8 +875,50 @@ def password_reset_log_read(limit=100):
     return out
 
 
+def post_apps_script_json(url, payload, timeout=30):
+    """
+    POST JSON to a Google Apps Script web app.
+    Apps Script runs doPost on the first request, then 302s to an echo URL.
+    That echo URL only accepts GET — re-POSTing it returns 405.
+    """
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "FilmDB/1.0",
+    }
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    opener = urllib.request.build_opener(_NoRedirect())
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        if e.code not in (301, 302, 303, 307, 308):
+            raise
+        loc = e.headers.get("Location")
+        if not loc:
+            raise
+        get_req = urllib.request.Request(
+            loc,
+            headers={"User-Agent": "FilmDB/1.0"},
+            method="GET",
+        )
+        with urllib.request.urlopen(get_req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    try:
+        return json.loads(raw) if raw.strip() else {}
+    except Exception:
+        return {"ok": True, "raw": raw[:200]}
+
+
 def send_temporary_password_email(email, user_name, temporary_password):
-    login_line = f"\n登入網址：{APP_LOGIN_URL}" if APP_LOGIN_URL else ""
+    settings = get_email_settings()
+    login_url = settings["app_login_url"]
+    login_line = f"\n登入網址：{login_url}" if login_url else ""
     text = (
         f"{APP_NAME} 密碼重設\n\n"
         f"使用者：{user_name}\n"
@@ -825,8 +929,8 @@ def send_temporary_password_email(email, user_name, temporary_password):
     safe_user = html.escape(str(user_name))
     safe_password = html.escape(temporary_password)
     login_html = (
-        f'<p><a href="{html.escape(APP_LOGIN_URL, quote=True)}">前往登入</a></p>'
-        if APP_LOGIN_URL else ""
+        f'<p><a href="{html.escape(login_url, quote=True)}">前往登入</a></p>'
+        if login_url else ""
     )
     html_body = (
         f"<h2>{html.escape(APP_NAME)} 密碼重設</h2>"
@@ -836,9 +940,75 @@ def send_temporary_password_email(email, user_name, temporary_password):
         f"{login_html}"
     )
 
-    if GMAIL_SMTP_USER and GMAIL_SMTP_PASSWORD:
+    resend_key = settings["resend_api_key"]
+    resend_from = settings["resend_from_email"]
+    webhook_url = settings["mail_webhook_url"]
+    webhook_secret = settings["mail_webhook_secret"]
+
+    # Apps Script webhook: sends via Gmail to ANY recipient (no domain verify).
+    if webhook_url and webhook_secret:
+        try:
+            data = post_apps_script_json(
+                webhook_url,
+                {
+                    "secret": webhook_secret,
+                    "to": normalize_email(email),
+                    "subject": f"{APP_NAME} 臨時密碼",
+                    "text": text,
+                    "html": html_body,
+                    "fromName": APP_NAME,
+                },
+            )
+            if data.get("ok") is False:
+                raise RuntimeError(data.get("error") or "Apps Script 寄送失敗")
+            return data.get("id") or "appscript:ok"
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Apps Script 寄送失敗 HTTP {e.code}: {detail[:200]}")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Apps Script 連線失敗: {str(e)[:180]}")
+
+    # Prefer Resend HTTP — Render blocks outbound SMTP.
+    if resend_key and resend_from:
+        payload = {
+            "from": resend_from,
+            "to": [normalize_email(email)],
+            "subject": f"{APP_NAME} 臨時密碼",
+            "text": text,
+            "html": html_body,
+        }
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {resend_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "FilmDB/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data.get("id") or ""
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Resend 寄送失敗 HTTP {e.code}: {detail[:200]}")
+
+    gmail_user = settings["gmail_smtp_user"]
+    gmail_password = settings["gmail_smtp_password"]
+    gmail_from_name = settings["gmail_from_name"]
+    on_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
+    if gmail_user and gmail_password and on_render:
+        raise RuntimeError(
+            "Render 無法使用 Gmail SMTP。請在試算表 config 設定 "
+            "mail_webhook_url / mail_webhook_secret（Apps Script，可寄任意人）。"
+        )
+    if gmail_user and gmail_password:
         message = EmailMessage()
-        message["From"] = formataddr((GMAIL_FROM_NAME, GMAIL_SMTP_USER))
+        message["From"] = formataddr((gmail_from_name, gmail_user))
         message["To"] = normalize_email(email)
         message["Subject"] = f"{APP_NAME} 臨時密碼"
         message["Message-ID"] = make_msgid()
@@ -885,7 +1055,7 @@ def send_temporary_password_email(email, user_name, temporary_password):
                     if code != 220:
                         raise RuntimeError(f"SMTP greeting {code}: {resp}")
                     smtp.ehlo()
-                smtp.login(GMAIL_SMTP_USER, GMAIL_SMTP_PASSWORD)
+                smtp.login(gmail_user, gmail_password)
                 smtp.send_message(message)
                 return f"gmail:{message['Message-ID']}"
             except smtplib.SMTPException as e:
@@ -908,35 +1078,11 @@ def send_temporary_password_email(email, user_name, temporary_password):
                         pass
         raise RuntimeError(last_error or "Gmail SMTP 寄送失敗")
 
-    if not RESEND_API_KEY or not RESEND_FROM_EMAIL:
-        raise RuntimeError(
-            "寄信服務尚未設定：請設定 Gmail SMTP 或 Resend 環境變數"
-        )
-
-    payload = {
-        "from": RESEND_FROM_EMAIL,
-        "to": [normalize_email(email)],
-        "subject": f"{APP_NAME} 臨時密碼",
-        "text": text,
-        "html": html_body,
-    }
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "User-Agent": "FilmDB/1.0",
-        },
-        method="POST",
+    raise RuntimeError(
+        "寄信服務尚未設定：請在 Google 試算表「config」新增 "
+        "mail_webhook_url 與 mail_webhook_secret（見 apps_script_mail.gs）。"
+        "此方式可用你的 Gmail 寄給任意收件人，無需驗證網域、無需改 Render。"
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data.get("id") or ""
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Resend 寄送失敗 HTTP {e.code}: {detail[:200]}")
 
 
 def admin_key_valid(value):
