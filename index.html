@@ -652,14 +652,16 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         </div>
         <div class="btn-row">
           <button class="btn btn-accent" id="btn-user-login" onclick="loginUser()">登入</button>
+          <button class="btn btn-sm" id="btn-user-register" onclick="registerUserAccount()">一鍵申請帳戶</button>
           <button class="btn btn-sm" onclick="showForgotPassword()">忘記密碼</button>
         </div>
+        <div style="font-size:10.5px;color:var(--text3);margin-top:8px;line-height:1.5">若沒收到密碼，請檢查垃圾郵件。</div>
         <div class="sbox" id="login-status" style="margin-top:10px"></div>
       </div>
 
       <div id="forgot-form-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
         <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">忘記密碼</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">輸入已登記的 Email，系統會寄送臨時密碼。請用臨時密碼登入後立即更改。</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">輸入已登記的 Email，系統會寄送臨時密碼。請用臨時密碼登入後立即更改。<br>若沒收到密碼，請檢查垃圾郵件。</div>
         <div class="field">
           <label class="fl">Email</label>
           <input class="fi" id="forgot-email" type="email" placeholder="you@example.com">
@@ -775,21 +777,12 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
         <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">使用者密碼重設</div>
         <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-          登記使用者 Email，並查看臨時密碼寄送及密碼更改紀錄。後台不保存可讀密碼，只保存安全雜湊。
+          使用者可在登入頁一鍵申請帳戶。此處顯示最近 20 筆申請、寄送及密碼更改紀錄；後台不保存可讀密碼。
         </div>
 
         <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-          <div style="font-size:11.5px;font-weight:500;margin-bottom:8px">登記／更新使用者帳號</div>
-          <input class="fi" id="password-user-email" type="email" placeholder="使用者 Email（同時作為登入帳號）">
-          <div class="btn-row" style="margin-top:8px">
-            <button class="btn btn-accent" id="btn-save-user-auth" onclick="saveUserAuth()">儲存 Email</button>
-          </div>
-          <div class="sbox" id="password-auth-status" style="margin-top:8px"></div>
-        </div>
-
-        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
           <div class="btn-row" style="justify-content:space-between;margin-bottom:8px">
-            <div style="font-size:11.5px;font-weight:500">最近重設紀錄</div>
+            <div style="font-size:11.5px;font-weight:500">最近 20 筆紀錄</div>
             <button class="btn btn-sm" onclick="loadPasswordResetRecords(true)">↻ 重新載入</button>
           </div>
           <div id="password-reset-records" style="font-size:11px;color:var(--text3)">載入中…</div>
@@ -3271,6 +3264,35 @@ function logoutUser() {
   refreshLoginPanel();
 }
 
+async function registerUserAccount() {
+  const email = (document.getElementById('login-email')?.value || '').trim();
+  const status = document.getElementById('login-status');
+  const btn = document.getElementById('btn-user-register');
+  if (!email) {
+    status.className = 'sbox show err';
+    status.textContent = '請先輸入 Email';
+    return;
+  }
+  status.className = 'sbox show loading';
+  status.innerHTML = '<span class="spin"></span> 建立帳戶並寄送臨時密碼…';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await apiFetch('/api/user/register', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+    if (!r.ok) throw new Error(r.error || '帳戶申請失敗');
+    status.className = 'sbox show ok';
+    status.textContent = '✓ ' + (r.message || '帳戶已建立，請到 Email 收取臨時密碼。') + ' 若沒收到密碼，請檢查垃圾郵件。';
+    toast('帳戶申請成功，請查看 Email', 'ok');
+  } catch (e) {
+    status.className = 'sbox show err';
+    status.textContent = '✗ ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function requestPasswordReset() {
   const email = (document.getElementById('forgot-email')?.value || '').trim();
   const status = document.getElementById('forgot-status');
@@ -3290,7 +3312,7 @@ async function requestPasswordReset() {
     });
     if (!r.ok && r.error) throw new Error(r.error);
     status.className = 'sbox show ok';
-    status.textContent = '✓ ' + (r.message || '如果此 Email 已登記，臨時密碼將寄到該信箱。');
+    status.textContent = '✓ ' + (r.message || '如果此 Email 已登記，臨時密碼將寄到該信箱。') + ' 若沒收到密碼，請檢查垃圾郵件。';
     toast('已送出重設請求', 'ok');
   } catch (e) {
     status.className = 'sbox show err';
@@ -3356,6 +3378,7 @@ async function changeUserPassword() {
 
 function passwordResetStatusLabel(status) {
   const labels = {
+    registered: '帳戶申請成功',
     sent: '已寄出臨時密碼',
     failed: '寄送失敗',
     password_changed: '使用者已更改密碼'
@@ -3370,8 +3393,8 @@ function renderPasswordResetRecords(records) {
     el.innerHTML = '<div style="padding:8px 0">尚無密碼重設紀錄</div>';
     return;
   }
-  el.innerHTML = records.map(row => {
-    const ok = row.status === 'sent' || row.status === 'password_changed';
+  el.innerHTML = records.slice(0, 20).map(row => {
+    const ok = row.status === 'registered' || row.status === 'sent' || row.status === 'password_changed';
     const color = ok ? 'var(--accent)' : 'var(--red)';
     const at = String(row.at || '').replace('T', ' ').replace('Z', ' UTC');
     return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">`
@@ -3393,41 +3416,13 @@ async function loadPasswordResetRecords(force = false) {
   }
   if (el) el.innerHTML = '<div class="sbox show loading"><span class="spin"></span> 載入重設紀錄…</div>';
   try {
-    const r = await apiFetch('/api/admin/password-resets?limit=100', {
+    const r = await apiFetch('/api/admin/password-resets?limit=20', {
       headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }
     });
     if (!r.ok) throw new Error(r.error || '載入失敗');
     renderPasswordResetRecords(r.records || []);
   } catch (e) {
     if (el) el.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function saveUserAuth() {
-  const email = (document.getElementById('password-user-email')?.value || '').trim();
-  const key = getPasswordAdminKey();
-  const status = document.getElementById('password-auth-status');
-  if (!email) {
-    status.className = 'sbox show err';
-    status.textContent = '請填寫使用者 Email';
-    return;
-  }
-  status.className = 'sbox show loading';
-  status.innerHTML = '<span class="spin"></span> 儲存中…';
-  try {
-    const r = await apiFetch('/api/admin/user/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key },
-      body: JSON.stringify({ email })
-    });
-    if (!r.ok) throw new Error(r.error || '儲存失敗');
-    status.className = 'sbox show ok';
-    status.textContent = `✓ 已登記 ${r.email}`;
-    document.getElementById('password-user-email').value = '';
-    toast('使用者 Email 已儲存', 'ok');
-  } catch (e) {
-    status.className = 'sbox show err';
-    status.textContent = '✗ ' + e.message;
   }
 }
 

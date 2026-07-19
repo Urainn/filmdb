@@ -21,6 +21,9 @@ import hashlib
 import hmac
 import secrets
 import html
+import smtplib
+from email.message import EmailMessage
+from email.utils import formataddr, make_msgid
 import traceback
 
 try:
@@ -101,6 +104,11 @@ RESEND_FROM_EMAIL = os.environ.get(
     "RESEND_FROM_EMAIL",
     "FilmDB <onboarding@resend.dev>",
 ).strip()
+GMAIL_SMTP_USER = os.environ.get("GMAIL_SMTP_USER", "").strip()
+GMAIL_SMTP_PASSWORD = "".join(
+    os.environ.get("GMAIL_SMTP_PASSWORD", "").split()
+)
+GMAIL_FROM_NAME = os.environ.get("GMAIL_FROM_NAME", "FilmDB").strip() or "FilmDB"
 ADMIN_API_KEY = os.environ.get(
     "ADMIN_API_KEY",
     "FLTWVls0pzrSlXHxjrJepha3useQg4NN",
@@ -805,8 +813,6 @@ def password_reset_log_read(limit=100):
 
 
 def send_temporary_password_email(email, user_name, temporary_password):
-    if not RESEND_API_KEY or not RESEND_FROM_EMAIL:
-        raise RuntimeError("Resend 尚未設定：缺少 RESEND_API_KEY 或 RESEND_FROM_EMAIL")
     login_line = f"\n登入網址：{APP_LOGIN_URL}" if APP_LOGIN_URL else ""
     text = (
         f"{APP_NAME} 密碼重設\n\n"
@@ -821,18 +827,48 @@ def send_temporary_password_email(email, user_name, temporary_password):
         f'<p><a href="{html.escape(APP_LOGIN_URL, quote=True)}">前往登入</a></p>'
         if APP_LOGIN_URL else ""
     )
+    html_body = (
+        f"<h2>{html.escape(APP_NAME)} 密碼重設</h2>"
+        f"<p>使用者：<strong>{safe_user}</strong></p>"
+        f"<p>臨時密碼：<code>{safe_password}</code></p>"
+        "<p>請登入後立即更改密碼。若不是你提出申請，請聯絡管理員。</p>"
+        f"{login_html}"
+    )
+
+    if GMAIL_SMTP_USER and GMAIL_SMTP_PASSWORD:
+        message = EmailMessage()
+        message["From"] = formataddr((GMAIL_FROM_NAME, GMAIL_SMTP_USER))
+        message["To"] = normalize_email(email)
+        message["Subject"] = f"{APP_NAME} 臨時密碼"
+        message["Message-ID"] = make_msgid()
+        message.set_content(text)
+        message.add_alternative(html_body, subtype="html")
+        try:
+            with smtplib.SMTP_SSL(
+                "smtp.gmail.com",
+                465,
+                timeout=20,
+                context=_SSL_CONTEXT,
+            ) as smtp:
+                smtp.login(GMAIL_SMTP_USER, GMAIL_SMTP_PASSWORD)
+                smtp.send_message(message)
+            return f"gmail:{message['Message-ID']}"
+        except smtplib.SMTPException as e:
+            raise RuntimeError(f"Gmail SMTP 寄送失敗: {str(e)[:200]}")
+        except Exception as e:
+            raise RuntimeError(f"Gmail SMTP 連線失敗: {str(e)[:200]}")
+
+    if not RESEND_API_KEY or not RESEND_FROM_EMAIL:
+        raise RuntimeError(
+            "寄信服務尚未設定：請設定 Gmail SMTP 或 Resend 環境變數"
+        )
+
     payload = {
         "from": RESEND_FROM_EMAIL,
         "to": [normalize_email(email)],
         "subject": f"{APP_NAME} 臨時密碼",
         "text": text,
-        "html": (
-            f"<h2>{html.escape(APP_NAME)} 密碼重設</h2>"
-            f"<p>使用者：<strong>{safe_user}</strong></p>"
-            f"<p>臨時密碼：<code>{safe_password}</code></p>"
-            "<p>請登入後立即更改密碼。若不是你提出申請，請聯絡管理員。</p>"
-            f"{login_html}"
-        ),
+        "html": html_body,
     }
     req = urllib.request.Request(
         "https://api.resend.com/emails",
@@ -2615,7 +2651,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 qs = parse_query_string(self.path)
-                rows = password_reset_log_read(qs.get("limit") or 100)
+                requested_limit = int(qs.get("limit") or 20)
+                rows = password_reset_log_read(min(max(requested_limit, 1), 20))
                 self.send_json(200, {"ok": True, "records": rows, "count": len(rows)})
             except Exception as e:
                 self.send_json(500, {"ok": False, "error": str(e)})
@@ -2771,6 +2808,58 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(500, {"ok": False, "error": str(e)})
             return
 
+        if path == "/api/user/register":
+            email = normalize_email(body.get("email"))
+            if not is_valid_email(email):
+                self.send_json(400, {"ok": False, "error": "Email 格式不正確"})
+                return
+            if password_reset_rate_limited(email):
+                self.send_json(429, {"ok": False, "error": "申請太頻繁，請稍後再試"})
+                return
+            try:
+                auth = user_auth_find(email)
+                if auth and auth.get("passwordHash"):
+                    self.send_json(409, {
+                        "ok": False,
+                        "error": "此 Email 已有帳戶，請直接登入或使用忘記密碼",
+                    })
+                    return
+                temporary_password = generate_temporary_password()
+                auth = auth or {
+                    "userName": email,
+                    "email": email,
+                    "emailDisplay": email,
+                }
+                auth.update(hash_password(temporary_password))
+                auth["forcePasswordChange"] = True
+                auth["updatedAt"] = utc_now()
+                user_auth_save(auth)
+                message_id = send_temporary_password_email(
+                    auth["emailDisplay"] or auth["email"],
+                    auth["userName"],
+                    temporary_password,
+                )
+                password_reset_log_append(
+                    auth["userName"],
+                    auth["email"],
+                    "registered",
+                    f"Message ID: {message_id}" if message_id else "帳戶建立並寄送成功",
+                )
+                self.send_json(201, {
+                    "ok": True,
+                    "message": "帳戶已建立，臨時密碼已寄到你的 Email。",
+                    "email": mask_email(email),
+                })
+            except RuntimeError as e:
+                try:
+                    password_reset_log_append(email, email, "failed", str(e), "register")
+                except Exception:
+                    pass
+                self.send_json(503, {"ok": False, "error": str(e)})
+            except Exception:
+                self.send_json(500, {"ok": False, "error": "帳戶申請失敗，請稍後再試"})
+            return
+
         if path == "/api/user/password/reset":
             email = normalize_email(body.get("email"))
             generic = {
@@ -2789,7 +2878,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(202, generic)
                     return
                 temporary_password = generate_temporary_password()
-                resend_id = send_temporary_password_email(
+                message_id = send_temporary_password_email(
                     auth["emailDisplay"] or auth["email"],
                     auth["userName"],
                     temporary_password,
@@ -2802,7 +2891,7 @@ class Handler(BaseHTTPRequestHandler):
                     auth["userName"],
                     auth["email"],
                     "sent",
-                    f"Resend ID: {resend_id}" if resend_id else "寄送成功",
+                    f"Message ID: {message_id}" if message_id else "寄送成功",
                 )
                 self.send_json(202, generic)
             except RuntimeError as e:
