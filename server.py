@@ -96,8 +96,14 @@ PASSWORD_RESET_LOG_SHEET = os.environ.get("PASSWORD_RESET_LOG_SHEET", "password_
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
-RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "").strip()
+RESEND_API_KEY = os.environ.get(
+    "RESEND_API_KEY",
+    "re_78SeNX3U_76dwWGfvYHMhyNcdVEhpt5Q3",
+).strip()
+RESEND_FROM_EMAIL = os.environ.get(
+    "RESEND_FROM_EMAIL",
+    "FilmDB <onboarding@resend.dev>",
+).strip()
 ADMIN_API_KEY = os.environ.get(
     "ADMIN_API_KEY",
     "FLTWVls0pzrSlXHxjrJepha3useQg4NN",
@@ -832,6 +838,7 @@ def send_temporary_password_email(email, user_name, temporary_password):
         headers={
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": "FilmDB/1.0",
         },
         method="POST",
     )
