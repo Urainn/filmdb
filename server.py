@@ -6,6 +6,7 @@ FilmDB cloud server - Google Sheets version.
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+import socket
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -843,20 +844,69 @@ def send_temporary_password_email(email, user_name, temporary_password):
         message["Message-ID"] = make_msgid()
         message.set_content(text)
         message.add_alternative(html_body, subtype="html")
-        try:
-            with smtplib.SMTP_SSL(
-                "smtp.gmail.com",
-                465,
-                timeout=20,
-                context=_SSL_CONTEXT,
-            ) as smtp:
+        last_error = ""
+        # Prefer STARTTLS/587 then SSL/465. Force IPv4 (Render often fails on IPv6)
+        # while keeping smtp.gmail.com as TLS server_hostname for cert checks.
+        for use_starttls, port in ((True, 587), (False, 465)):
+            smtp = None
+            raw_sock = None
+            try:
+                infos = socket.getaddrinfo(
+                    "smtp.gmail.com",
+                    port,
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                )
+                if not infos:
+                    raise RuntimeError(f"找不到 smtp.gmail.com:{port} 的 IPv4 位址")
+                host_ip = infos[0][4][0]
+                raw_sock = socket.create_connection((host_ip, port), timeout=20)
+                if use_starttls:
+                    smtp = smtplib.SMTP()
+                    smtp.sock = raw_sock
+                    smtp._host = "smtp.gmail.com"
+                    raw_sock = None  # ownership transferred
+                    code, resp = smtp.getreply()
+                    if code != 220:
+                        raise RuntimeError(f"SMTP greeting {code}: {resp}")
+                    smtp.ehlo()
+                    smtp.starttls(context=_SSL_CONTEXT)
+                    smtp.ehlo()
+                else:
+                    tls_sock = _SSL_CONTEXT.wrap_socket(
+                        raw_sock,
+                        server_hostname="smtp.gmail.com",
+                    )
+                    raw_sock = None
+                    smtp = smtplib.SMTP_SSL()
+                    smtp.sock = tls_sock
+                    smtp._host = "smtp.gmail.com"
+                    code, resp = smtp.getreply()
+                    if code != 220:
+                        raise RuntimeError(f"SMTP greeting {code}: {resp}")
+                    smtp.ehlo()
                 smtp.login(GMAIL_SMTP_USER, GMAIL_SMTP_PASSWORD)
                 smtp.send_message(message)
-            return f"gmail:{message['Message-ID']}"
-        except smtplib.SMTPException as e:
-            raise RuntimeError(f"Gmail SMTP 寄送失敗: {str(e)[:200]}")
-        except Exception as e:
-            raise RuntimeError(f"Gmail SMTP 連線失敗: {str(e)[:200]}")
+                return f"gmail:{message['Message-ID']}"
+            except smtplib.SMTPException as e:
+                last_error = f"Gmail SMTP 寄送失敗 ({port}): {str(e)[:180]}"
+            except Exception as e:
+                last_error = f"Gmail SMTP 連線失敗 ({port}): {str(e)[:180]}"
+            finally:
+                if smtp is not None:
+                    try:
+                        smtp.quit()
+                    except Exception:
+                        try:
+                            smtp.close()
+                        except Exception:
+                            pass
+                if raw_sock is not None:
+                    try:
+                        raw_sock.close()
+                    except Exception:
+                        pass
+        raise RuntimeError(last_error or "Gmail SMTP 寄送失敗")
 
     if not RESEND_API_KEY or not RESEND_FROM_EMAIL:
         raise RuntimeError(
