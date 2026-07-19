@@ -205,6 +205,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
 
     <div class="nav-label" style="margin-top:6px">APP 專用</div>
+    <div class="nav-item" onclick="go('login',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="6" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>使用者登入
+    </div>
     <div class="nav-item" onclick="go('sheets',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/></svg>APP 電影卡片
     </div>
@@ -619,6 +622,83 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
   </div>
 
+  <!-- LOGIN -->
+  <div id="panel-login" class="panel">
+    <div class="page-head">
+      <div>
+        <div class="page-title">使用者登入</div>
+        <div class="page-sub">用 Email 登入；忘記密碼可寄送臨時密碼到信箱</div>
+      </div>
+    </div>
+
+    <div style="max-width:420px">
+      <div id="login-session-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">目前登入</div>
+        <div id="login-session-info" style="font-size:12px;color:var(--text2);margin-bottom:10px"></div>
+        <div class="btn-row">
+          <button class="btn btn-sm" onclick="showLoginChangeForm()">更改密碼</button>
+          <button class="btn btn-sm" onclick="logoutUser()">登出</button>
+        </div>
+      </div>
+
+      <div id="login-form-box" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
+        <div class="field">
+          <label class="fl">Email</label>
+          <input class="fi" id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label class="fl">密碼</label>
+          <input class="fi" id="login-password" type="password" autocomplete="current-password" placeholder="輸入密碼或臨時密碼">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-accent" id="btn-user-login" onclick="loginUser()">登入</button>
+          <button class="btn btn-sm" onclick="showForgotPassword()">忘記密碼</button>
+        </div>
+        <div class="sbox" id="login-status" style="margin-top:10px"></div>
+      </div>
+
+      <div id="forgot-form-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">忘記密碼</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">輸入已登記的 Email，系統會寄送臨時密碼。請用臨時密碼登入後立即更改。</div>
+        <div class="field">
+          <label class="fl">Email</label>
+          <input class="fi" id="forgot-email" type="email" placeholder="you@example.com">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-accent" id="btn-forgot-password" onclick="requestPasswordReset()">寄送臨時密碼</button>
+          <button class="btn btn-sm" onclick="showLoginForm()">返回登入</button>
+        </div>
+        <div class="sbox" id="forgot-status" style="margin-top:10px"></div>
+      </div>
+
+      <div id="change-form-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">更改密碼</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55" id="change-form-hint">臨時密碼登入後請立即設定新密碼（至少 10 字元）</div>
+        <div class="field">
+          <label class="fl">Email</label>
+          <input class="fi" id="change-email" type="email" autocomplete="username">
+        </div>
+        <div class="field">
+          <label class="fl">目前密碼／臨時密碼</label>
+          <input class="fi" id="change-current" type="password" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label class="fl">新密碼</label>
+          <input class="fi" id="change-new" type="password" autocomplete="new-password" placeholder="至少 10 個字元">
+        </div>
+        <div class="field">
+          <label class="fl">確認新密碼</label>
+          <input class="fi" id="change-new2" type="password" autocomplete="new-password">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-accent" id="btn-change-password" onclick="changeUserPassword()">更新密碼</button>
+          <button class="btn btn-sm" onclick="showLoginForm()">取消</button>
+        </div>
+        <div class="sbox" id="change-status" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- SETTINGS -->
   <div id="panel-settings" class="panel">
     <div class="page-head">
@@ -690,6 +770,30 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
           <button class="btn btn-sm" onclick="resetSearchSynonyms()">還原預設</button>
         </div>
         <div class="sbox" id="synonyms-save-status" style="margin-top:10px"></div>
+      </div>
+
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">使用者密碼重設</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
+          登記使用者 Email，並查看臨時密碼寄送及密碼更改紀錄。後台不保存可讀密碼，只保存安全雜湊。
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+          <div style="font-size:11.5px;font-weight:500;margin-bottom:8px">登記／更新使用者帳號</div>
+          <input class="fi" id="password-user-email" type="email" placeholder="使用者 Email（同時作為登入帳號）">
+          <div class="btn-row" style="margin-top:8px">
+            <button class="btn btn-accent" id="btn-save-user-auth" onclick="saveUserAuth()">儲存 Email</button>
+          </div>
+          <div class="sbox" id="password-auth-status" style="margin-top:8px"></div>
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+          <div class="btn-row" style="justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:11.5px;font-weight:500">最近重設紀錄</div>
+            <button class="btn btn-sm" onclick="loadPasswordResetRecords(true)">↻ 重新載入</button>
+          </div>
+          <div id="password-reset-records" style="font-size:11px;color:var(--text3)">載入中…</div>
+        </div>
       </div>
     </div>
   </div>
@@ -886,16 +990,18 @@ function go(name, el) {
   if (el) el.classList.add('active');
   else {
     const map = {
-      list: 0, add: 1, 'search-yt': 2, sheets: 3,
-      'user-analyze': 4, 'user-stats': 5, 'admin-push': 6, io: 7, settings: 8
+      list: 0, add: 1, 'search-yt': 2, login: 3, sheets: 4,
+      'user-analyze': 5, 'user-stats': 6, 'admin-push': 7, io: 8, settings: 9
     };
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
   if (name === 'add') resetAdd();
+  if (name === 'login') refreshLoginPanel();
   if (name === 'settings') {
     loadKeyStatus();
     loadSearchSynonyms();
+    loadPasswordResetRecords(false);
   }
   if (name === 'admin-push') loadAdminPushDashboard();
   if (name === 'user-stats') loadUserStats();
@@ -3018,6 +3124,310 @@ async function saveKeys() {
   } catch (e) {
     st.className = 'sbox show err';
     st.textContent = '✗ 儲存失敗：' + e.message;
+  }
+}
+
+const DEFAULT_ADMIN_API_KEY = 'FLTWVls0pzrSlXHxjrJepha3useQg4NN';
+const LOGIN_SESSION_KEY = 'filmdbUserSession';
+
+function getPasswordAdminKey() {
+  return DEFAULT_ADMIN_API_KEY;
+}
+
+function getLoginSession() {
+  try {
+    return JSON.parse(localStorage.getItem(LOGIN_SESSION_KEY) || 'null');
+  } catch (_) {
+    return null;
+  }
+}
+
+function setLoginSession(session) {
+  try {
+    if (session) localStorage.setItem(LOGIN_SESSION_KEY, JSON.stringify(session));
+    else localStorage.removeItem(LOGIN_SESSION_KEY);
+  } catch (_) {}
+}
+
+function showLoginForm() {
+  const login = document.getElementById('login-form-box');
+  const forgot = document.getElementById('forgot-form-box');
+  const change = document.getElementById('change-form-box');
+  if (login) login.style.display = 'block';
+  if (forgot) forgot.style.display = 'none';
+  if (change) change.style.display = 'none';
+}
+
+function showForgotPassword() {
+  const login = document.getElementById('login-form-box');
+  const forgot = document.getElementById('forgot-form-box');
+  const change = document.getElementById('change-form-box');
+  if (login) login.style.display = 'none';
+  if (forgot) forgot.style.display = 'block';
+  if (change) change.style.display = 'none';
+  const email = (document.getElementById('login-email')?.value || '').trim();
+  const forgotEmail = document.getElementById('forgot-email');
+  if (email && forgotEmail) forgotEmail.value = email;
+}
+
+function showLoginChangeForm(force = false) {
+  const session = getLoginSession();
+  const login = document.getElementById('login-form-box');
+  const forgot = document.getElementById('forgot-form-box');
+  const change = document.getElementById('change-form-box');
+  if (login) login.style.display = 'none';
+  if (forgot) forgot.style.display = 'none';
+  if (change) change.style.display = 'block';
+  const hint = document.getElementById('change-form-hint');
+  if (hint) {
+    hint.textContent = force
+      ? '偵測到臨時密碼，請立即設定新密碼（至少 10 字元）'
+      : '請輸入目前密碼，並設定新密碼（至少 10 字元）';
+  }
+  const emailEl = document.getElementById('change-email');
+  if (emailEl) {
+    emailEl.value = session?.emailRaw
+      || document.getElementById('login-email')?.value
+      || session?.userName
+      || '';
+  }
+  const current = document.getElementById('change-current');
+  if (current && !current.value) {
+    current.value = document.getElementById('login-password')?.value || '';
+  }
+}
+
+function refreshLoginPanel() {
+  const session = getLoginSession();
+  const box = document.getElementById('login-session-box');
+  const info = document.getElementById('login-session-info');
+  if (!box || !info) return;
+  if (session?.userName) {
+    box.style.display = 'block';
+    info.innerHTML = `帳號：<b style="color:var(--text)">${escapeHtml(session.email || session.userName)}</b>`
+      + (session.forcePasswordChange
+        ? ' <span style="color:var(--amber)">· 需更改密碼</span>'
+        : '');
+    if (session.forcePasswordChange) showLoginChangeForm(true);
+    else showLoginForm();
+  } else {
+    box.style.display = 'none';
+    showLoginForm();
+  }
+}
+
+async function loginUser() {
+  const email = (document.getElementById('login-email')?.value || '').trim();
+  const password = document.getElementById('login-password')?.value || '';
+  const status = document.getElementById('login-status');
+  const btn = document.getElementById('btn-user-login');
+  if (!email || !password) {
+    status.className = 'sbox show err';
+    status.textContent = '請輸入 Email 與密碼';
+    return;
+  }
+  status.className = 'sbox show loading';
+  status.innerHTML = '<span class="spin"></span> 登入中…';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await apiFetch('/api/user/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password })
+    });
+    if (!r.ok) throw new Error(r.error || '登入失敗');
+    setLoginSession({
+      userName: r.userName,
+      email: r.email,
+      emailRaw: email,
+      forcePasswordChange: !!r.forcePasswordChange,
+      loggedInAt: new Date().toISOString()
+    });
+    const tempPassword = password;
+    status.className = 'sbox show ok';
+    status.textContent = r.forcePasswordChange
+      ? '✓ 登入成功，請立即更改臨時密碼'
+      : `✓ 已登入 ${r.email || r.userName}`;
+    document.getElementById('login-password').value = '';
+    toast(r.forcePasswordChange ? '請更改臨時密碼' : '登入成功', 'ok');
+    refreshLoginPanel();
+    if (r.forcePasswordChange) {
+      const current = document.getElementById('change-current');
+      if (current) current.value = tempPassword;
+      showLoginChangeForm(true);
+    }
+  } catch (e) {
+    status.className = 'sbox show err';
+    status.textContent = '✗ ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function logoutUser() {
+  setLoginSession(null);
+  document.getElementById('login-status').className = 'sbox';
+  document.getElementById('login-status').textContent = '';
+  toast('已登出', 'ok');
+  refreshLoginPanel();
+}
+
+async function requestPasswordReset() {
+  const email = (document.getElementById('forgot-email')?.value || '').trim();
+  const status = document.getElementById('forgot-status');
+  const btn = document.getElementById('btn-forgot-password');
+  if (!email) {
+    status.className = 'sbox show err';
+    status.textContent = '請輸入 Email';
+    return;
+  }
+  status.className = 'sbox show loading';
+  status.innerHTML = '<span class="spin"></span> 寄送中…';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await apiFetch('/api/user/password/reset', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+    if (!r.ok && r.error) throw new Error(r.error);
+    status.className = 'sbox show ok';
+    status.textContent = '✓ ' + (r.message || '如果此 Email 已登記，臨時密碼將寄到該信箱。');
+    toast('已送出重設請求', 'ok');
+  } catch (e) {
+    status.className = 'sbox show err';
+    status.textContent = '✗ ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function changeUserPassword() {
+  const email = (document.getElementById('change-email')?.value || '').trim();
+  const currentPassword = document.getElementById('change-current')?.value || '';
+  const newPassword = document.getElementById('change-new')?.value || '';
+  const newPassword2 = document.getElementById('change-new2')?.value || '';
+  const status = document.getElementById('change-status');
+  const btn = document.getElementById('btn-change-password');
+  if (!email || !currentPassword || !newPassword) {
+    status.className = 'sbox show err';
+    status.textContent = '請填寫所有欄位';
+    return;
+  }
+  if (newPassword !== newPassword2) {
+    status.className = 'sbox show err';
+    status.textContent = '兩次輸入的新密碼不一致';
+    return;
+  }
+  if (newPassword.length < 10) {
+    status.className = 'sbox show err';
+    status.textContent = '新密碼至少需要 10 個字元';
+    return;
+  }
+  status.className = 'sbox show loading';
+  status.innerHTML = '<span class="spin"></span> 更新中…';
+  if (btn) btn.disabled = true;
+  try {
+    const r = await apiFetch('/api/user/password/change', {
+      method: 'POST',
+      body: JSON.stringify({ email, currentPassword, newPassword })
+    });
+    if (!r.ok) throw new Error(r.error || '更新失敗');
+    const session = getLoginSession() || {};
+    setLoginSession({
+      ...session,
+      userName: session.userName || email,
+      emailRaw: email,
+      email: session.email || email,
+      forcePasswordChange: false
+    });
+    document.getElementById('change-current').value = '';
+    document.getElementById('change-new').value = '';
+    document.getElementById('change-new2').value = '';
+    status.className = 'sbox show ok';
+    status.textContent = '✓ 密碼已更新';
+    toast('密碼已更新', 'ok');
+    refreshLoginPanel();
+  } catch (e) {
+    status.className = 'sbox show err';
+    status.textContent = '✗ ' + e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function passwordResetStatusLabel(status) {
+  const labels = {
+    sent: '已寄出臨時密碼',
+    failed: '寄送失敗',
+    password_changed: '使用者已更改密碼'
+  };
+  return labels[status] || status || '未知';
+}
+
+function renderPasswordResetRecords(records) {
+  const el = document.getElementById('password-reset-records');
+  if (!el) return;
+  if (!records?.length) {
+    el.innerHTML = '<div style="padding:8px 0">尚無密碼重設紀錄</div>';
+    return;
+  }
+  el.innerHTML = records.map(row => {
+    const ok = row.status === 'sent' || row.status === 'password_changed';
+    const color = ok ? 'var(--accent)' : 'var(--red)';
+    const at = String(row.at || '').replace('T', ' ').replace('Z', ' UTC');
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">`
+      + `<div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">`
+      + `<span><b style="color:var(--text)">${escapeHtml(row.userName || '—')}</b> · ${escapeHtml(row.email || '—')}</span>`
+      + `<span style="color:${color};font-weight:500">${escapeHtml(passwordResetStatusLabel(row.status))}</span>`
+      + `</div>`
+      + `<div style="font-size:10px;margin-top:3px">${escapeHtml(at)}${row.detail ? ' · ' + escapeHtml(row.detail) : ''}</div>`
+      + `</div>`;
+  }).join('');
+}
+
+async function loadPasswordResetRecords(force = false) {
+  const el = document.getElementById('password-reset-records');
+  const key = getPasswordAdminKey();
+  if (!key) {
+    if (force && el) el.innerHTML = '<div class="sbox show err">管理金鑰未設定</div>';
+    return;
+  }
+  if (el) el.innerHTML = '<div class="sbox show loading"><span class="spin"></span> 載入重設紀錄…</div>';
+  try {
+    const r = await apiFetch('/api/admin/password-resets?limit=100', {
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }
+    });
+    if (!r.ok) throw new Error(r.error || '載入失敗');
+    renderPasswordResetRecords(r.records || []);
+  } catch (e) {
+    if (el) el.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function saveUserAuth() {
+  const email = (document.getElementById('password-user-email')?.value || '').trim();
+  const key = getPasswordAdminKey();
+  const status = document.getElementById('password-auth-status');
+  if (!email) {
+    status.className = 'sbox show err';
+    status.textContent = '請填寫使用者 Email';
+    return;
+  }
+  status.className = 'sbox show loading';
+  status.innerHTML = '<span class="spin"></span> 儲存中…';
+  try {
+    const r = await apiFetch('/api/admin/user/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key },
+      body: JSON.stringify({ email })
+    });
+    if (!r.ok) throw new Error(r.error || '儲存失敗');
+    status.className = 'sbox show ok';
+    status.textContent = `✓ 已登記 ${r.email}`;
+    document.getElementById('password-user-email').value = '';
+    toast('使用者 Email 已儲存', 'ok');
+  } catch (e) {
+    status.className = 'sbox show err';
+    status.textContent = '✗ ' + e.message;
   }
 }
 

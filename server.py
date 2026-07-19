@@ -17,6 +17,10 @@ import threading
 import base64
 import sys
 import ssl
+import hashlib
+import hmac
+import secrets
+import html
 import traceback
 
 try:
@@ -87,9 +91,21 @@ USER_PREFS_SHEET = os.environ.get("USER_PREFS_SHEET", "user_prefs")
 PUSH_FEED_SHEET = os.environ.get("PUSH_FEED_SHEET", "push_feed")
 USER_EVENTS_SHEET = os.environ.get("USER_EVENTS_SHEET", "user_events")
 ROOMS_SHEET = os.environ.get("ROOMS_SHEET", "multi_rooms")
+USER_AUTH_SHEET = os.environ.get("USER_AUTH_SHEET", "user_auth")
+PASSWORD_RESET_LOG_SHEET = os.environ.get("PASSWORD_RESET_LOG_SHEET", "password_reset_log")
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
+RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "").strip()
+ADMIN_API_KEY = os.environ.get(
+    "ADMIN_API_KEY",
+    "FLTWVls0pzrSlXHxjrJepha3useQg4NN",
+).strip()
+APP_NAME = os.environ.get("APP_NAME", "FilmDB").strip() or "FilmDB"
+APP_LOGIN_URL = os.environ.get("APP_LOGIN_URL", "").strip()
+PASSWORD_PBKDF2_ITERATIONS = 310_000
+PASSWORD_RESET_COOLDOWN_SECONDS = 60
 
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -144,6 +160,8 @@ _push_feed_cache = {}
 _push_feed_lock = threading.Lock()
 _rooms_cache = {}
 _rooms_lock = threading.Lock()
+_password_reset_lock = threading.Lock()
+_password_reset_attempts = {}
 
 
 def get_access_token():
@@ -235,7 +253,16 @@ def ensure_sheet():
     try:
         info = sheets_request("GET", "")
         names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        for name in [SHEET_NAME, CONFIG_SHEET, USER_PREFS_SHEET, PUSH_FEED_SHEET, USER_EVENTS_SHEET, ROOMS_SHEET]:
+        for name in [
+            SHEET_NAME,
+            CONFIG_SHEET,
+            USER_PREFS_SHEET,
+            PUSH_FEED_SHEET,
+            USER_EVENTS_SHEET,
+            ROOMS_SHEET,
+            USER_AUTH_SHEET,
+            PASSWORD_RESET_LOG_SHEET,
+        ]:
             if name not in names:
                 sheets_request("POST", ":batchUpdate", {
                     "requests": [{"addSheet": {"properties": {"title": name}}}]
@@ -599,6 +626,245 @@ def set_user_temperature(user_name, movie_id, temperature):
         user_behavior[user_name] = normalized
     persist_user_prefs(user_name)
     return normalized
+
+
+def normalize_email(value):
+    return str(value or "").strip().lower()
+
+
+def is_valid_email(value):
+    email = normalize_email(value)
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)) and len(email) <= 254
+
+
+def mask_email(value):
+    email = normalize_email(value)
+    if "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    shown = local[:2] if len(local) > 2 else local[:1]
+    return f"{shown}{'*' * max(2, len(local) - len(shown))}@{domain}"
+
+
+def hash_password(password, salt=None):
+    password = str(password or "")
+    if salt is None:
+        salt_bytes = secrets.token_bytes(16)
+    elif isinstance(salt, bytes):
+        salt_bytes = salt
+    else:
+        salt_bytes = base64.b64decode(str(salt))
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt_bytes,
+        PASSWORD_PBKDF2_ITERATIONS,
+    )
+    return {
+        "passwordHash": base64.b64encode(digest).decode("ascii"),
+        "passwordSalt": base64.b64encode(salt_bytes).decode("ascii"),
+    }
+
+
+def verify_password(password, auth):
+    try:
+        expected = base64.b64decode(auth.get("passwordHash") or "")
+        salt = base64.b64decode(auth.get("passwordSalt") or "")
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            str(password or "").encode("utf-8"),
+            salt,
+            PASSWORD_PBKDF2_ITERATIONS,
+        )
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+
+def validate_new_password(password):
+    password = str(password or "")
+    if len(password) < 10:
+        return "密碼至少需要 10 個字元"
+    if len(password) > 128:
+        return "密碼不可超過 128 個字元"
+    return ""
+
+
+def generate_temporary_password():
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(16))
+
+
+def user_auth_read_all():
+    ensure_sheet()
+    encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A:G")
+    rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+    out = []
+    for index, row in enumerate(rows, start=1):
+        if not row:
+            continue
+        user_name = str(row[0]).strip()
+        if not user_name or user_name.lower() == "username":
+            continue
+        padded = list(row) + [""] * (7 - len(row))
+        out.append({
+            "row": index,
+            "userName": user_name,
+            "email": normalize_email(padded[1]),
+            "emailDisplay": str(padded[2] or padded[1]).strip(),
+            "passwordHash": str(padded[3]).strip(),
+            "passwordSalt": str(padded[4]).strip(),
+            "forcePasswordChange": str(padded[5]).lower() in ("1", "true", "yes"),
+            "updatedAt": str(padded[6]).strip(),
+        })
+    return out
+
+
+def user_auth_find(identifier):
+    needle = str(identifier or "").strip()
+    email = normalize_email(needle)
+    for auth in user_auth_read_all():
+        if auth["userName"] == needle or (email and auth["email"] == email):
+            return auth
+    return None
+
+
+def user_auth_save(auth):
+    user_name = str(auth.get("userName") or "").strip()
+    email = normalize_email(auth.get("email"))
+    if not user_name or not is_valid_email(email):
+        raise ValueError("缺少有效的 userName 或 email")
+    email_owner = user_auth_find(email)
+    if email_owner and email_owner["userName"] != user_name:
+        raise ValueError("此 Email 已登記給其他使用者")
+    existing = user_auth_find(user_name)
+    row = [
+        user_name,
+        email,
+        str(auth.get("emailDisplay") or email).strip(),
+        str(auth.get("passwordHash") or ""),
+        str(auth.get("passwordSalt") or ""),
+        "true" if auth.get("forcePasswordChange") else "false",
+        str(auth.get("updatedAt") or utc_now()),
+    ]
+    if existing:
+        encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A{existing['row']}:G{existing['row']}")
+        sheets_request(
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
+            {"values": [row]},
+        )
+    else:
+        encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A:G")
+        sheets_request(
+            "POST",
+            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            {"values": [row]},
+        )
+
+
+def password_reset_log_append(user_name, email, status, detail="", requested_by="user"):
+    ensure_sheet()
+    entry = {
+        "at": utc_now(),
+        "userName": str(user_name or ""),
+        "email": mask_email(email),
+        "status": str(status or ""),
+        "detail": str(detail or "")[:300],
+        "requestedBy": str(requested_by or "user")[:80],
+    }
+    encoded = urllib.parse.quote(f"{PASSWORD_RESET_LOG_SHEET}!A:A")
+    sheets_request(
+        "POST",
+        f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+        {"values": [[json.dumps(entry, ensure_ascii=False)]]},
+    )
+
+
+def password_reset_log_read(limit=100):
+    ensure_sheet()
+    encoded = urllib.parse.quote(f"{PASSWORD_RESET_LOG_SHEET}!A:A")
+    rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+    out = []
+    for row in reversed(rows[-max(1, min(int(limit), 500)):]):
+        if not row:
+            continue
+        try:
+            out.append(json.loads(row[0]))
+        except Exception:
+            continue
+    return out
+
+
+def send_temporary_password_email(email, user_name, temporary_password):
+    if not RESEND_API_KEY or not RESEND_FROM_EMAIL:
+        raise RuntimeError("Resend 尚未設定：缺少 RESEND_API_KEY 或 RESEND_FROM_EMAIL")
+    login_line = f"\n登入網址：{APP_LOGIN_URL}" if APP_LOGIN_URL else ""
+    text = (
+        f"{APP_NAME} 密碼重設\n\n"
+        f"使用者：{user_name}\n"
+        f"臨時密碼：{temporary_password}\n\n"
+        "請登入後立即更改密碼。若不是你提出申請，請聯絡管理員。"
+        f"{login_line}"
+    )
+    safe_user = html.escape(str(user_name))
+    safe_password = html.escape(temporary_password)
+    login_html = (
+        f'<p><a href="{html.escape(APP_LOGIN_URL, quote=True)}">前往登入</a></p>'
+        if APP_LOGIN_URL else ""
+    )
+    payload = {
+        "from": RESEND_FROM_EMAIL,
+        "to": [normalize_email(email)],
+        "subject": f"{APP_NAME} 臨時密碼",
+        "text": text,
+        "html": (
+            f"<h2>{html.escape(APP_NAME)} 密碼重設</h2>"
+            f"<p>使用者：<strong>{safe_user}</strong></p>"
+            f"<p>臨時密碼：<code>{safe_password}</code></p>"
+            "<p>請登入後立即更改密碼。若不是你提出申請，請聯絡管理員。</p>"
+            f"{login_html}"
+        ),
+    }
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("id") or ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Resend 寄送失敗 HTTP {e.code}: {detail[:200]}")
+
+
+def admin_key_valid(value):
+    return bool(ADMIN_API_KEY) and hmac.compare_digest(
+        str(value or "").encode("utf-8"),
+        ADMIN_API_KEY.encode("utf-8"),
+    )
+
+
+def password_reset_rate_limited(email):
+    key = hashlib.sha256(normalize_email(email).encode("utf-8")).hexdigest()
+    now = time.time()
+    with _password_reset_lock:
+        last = _password_reset_attempts.get(key, 0)
+        if now - last < PASSWORD_RESET_COOLDOWN_SECONDS:
+            return True
+        _password_reset_attempts[key] = now
+        if len(_password_reset_attempts) > 2000:
+            cutoff = now - 3600
+            for old_key, timestamp in list(_password_reset_attempts.items()):
+                if timestamp < cutoff:
+                    _password_reset_attempts.pop(old_key, None)
+    return False
 
 
 def movie_to_sheets_card(m, score=None, match_reasons=None):
@@ -2283,7 +2549,7 @@ class Handler(BaseHTTPRequestHandler):
     def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key")
 
     def send_json(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -2333,6 +2599,18 @@ class Handler(BaseHTTPRequestHandler):
             with _user_lock:
                 snapshot = dict(user_behavior)
             self.send_json(200, {"ok": True, **global_user_stats(snapshot, movies)})
+
+        elif path == "/api/admin/password-resets":
+            if not admin_key_valid(self.headers.get("X-Admin-Key")):
+                self.send_json(401, {"ok": False, "error": "未授權"})
+                return
+            try:
+                qs = parse_query_string(self.path)
+                rows = password_reset_log_read(qs.get("limit") or 100)
+                self.send_json(200, {"ok": True, "records": rows, "count": len(rows)})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
 
         elif path in ("/api/admin/push/list", "/api/admin/multi/overview"):
             try:
@@ -2448,6 +2726,141 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?")[0]
         body = self.read_body()
+
+        if path == "/api/admin/user/auth":
+            if not admin_key_valid(self.headers.get("X-Admin-Key")):
+                self.send_json(401, {"ok": False, "error": "未授權"})
+                return
+            email = normalize_email(body.get("email"))
+            user_name = str(body.get("userName") or email).strip()
+            new_password = str(body.get("newPassword") or "")
+            if not is_valid_email(email):
+                self.send_json(400, {"ok": False, "error": "請提供有效的 Email"})
+                return
+            password_error = validate_new_password(new_password) if new_password else ""
+            if password_error:
+                self.send_json(400, {"ok": False, "error": password_error})
+                return
+            try:
+                auth = user_auth_find(user_name) or {"userName": user_name}
+                auth.update({
+                    "email": email,
+                    "emailDisplay": str(body.get("email") or email).strip(),
+                    "updatedAt": utc_now(),
+                })
+                if new_password:
+                    auth.update(hash_password(new_password))
+                    auth["forcePasswordChange"] = bool(body.get("forcePasswordChange", False))
+                user_auth_save(auth)
+                self.send_json(200, {
+                    "ok": True,
+                    "userName": user_name,
+                    "email": mask_email(email),
+                    "hasPassword": bool(auth.get("passwordHash")),
+                })
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        if path == "/api/user/password/reset":
+            email = normalize_email(body.get("email"))
+            generic = {
+                "ok": True,
+                "message": "如果此 Email 已登記，臨時密碼將寄到該信箱。",
+            }
+            if not is_valid_email(email):
+                self.send_json(400, {"ok": False, "error": "Email 格式不正確"})
+                return
+            if password_reset_rate_limited(email):
+                self.send_json(202, generic)
+                return
+            try:
+                auth = user_auth_find(email)
+                if not auth:
+                    self.send_json(202, generic)
+                    return
+                temporary_password = generate_temporary_password()
+                resend_id = send_temporary_password_email(
+                    auth["emailDisplay"] or auth["email"],
+                    auth["userName"],
+                    temporary_password,
+                )
+                auth.update(hash_password(temporary_password))
+                auth["forcePasswordChange"] = True
+                auth["updatedAt"] = utc_now()
+                user_auth_save(auth)
+                password_reset_log_append(
+                    auth["userName"],
+                    auth["email"],
+                    "sent",
+                    f"Resend ID: {resend_id}" if resend_id else "寄送成功",
+                )
+                self.send_json(202, generic)
+            except RuntimeError as e:
+                try:
+                    password_reset_log_append("", email, "failed", str(e))
+                except Exception:
+                    pass
+                self.send_json(503, {"ok": False, "error": str(e)})
+            except Exception as e:
+                try:
+                    password_reset_log_append("", email, "failed", str(e))
+                except Exception:
+                    pass
+                self.send_json(500, {"ok": False, "error": "密碼重設暫時失敗，請稍後再試"})
+            return
+
+        if path == "/api/user/login":
+            identifier = str(body.get("email") or body.get("userName") or "").strip()
+            password = str(body.get("password") or "")
+            if not identifier or not password:
+                self.send_json(400, {"ok": False, "error": "缺少 Email／userName 或密碼"})
+                return
+            try:
+                auth = user_auth_find(identifier)
+                if not auth or not verify_password(password, auth):
+                    self.send_json(401, {"ok": False, "error": "帳號或密碼錯誤"})
+                    return
+                self.send_json(200, {
+                    "ok": True,
+                    "userName": auth["userName"],
+                    "email": mask_email(auth["email"]),
+                    "forcePasswordChange": auth["forcePasswordChange"],
+                })
+            except Exception:
+                self.send_json(500, {"ok": False, "error": "登入服務暫時不可用"})
+            return
+
+        if path == "/api/user/password/change":
+            identifier = str(body.get("email") or body.get("userName") or "").strip()
+            current_password = str(body.get("currentPassword") or "")
+            new_password = str(body.get("newPassword") or "")
+            password_error = validate_new_password(new_password)
+            if not identifier or not current_password:
+                self.send_json(400, {"ok": False, "error": "缺少帳號或目前密碼"})
+                return
+            if password_error:
+                self.send_json(400, {"ok": False, "error": password_error})
+                return
+            try:
+                auth = user_auth_find(identifier)
+                if not auth or not verify_password(current_password, auth):
+                    self.send_json(401, {"ok": False, "error": "帳號或目前密碼錯誤"})
+                    return
+                auth.update(hash_password(new_password))
+                auth["forcePasswordChange"] = False
+                auth["updatedAt"] = utc_now()
+                user_auth_save(auth)
+                password_reset_log_append(
+                    auth["userName"],
+                    auth["email"],
+                    "password_changed",
+                    "使用者已更改密碼",
+                )
+                self.send_json(200, {"ok": True, "message": "密碼已更新"})
+            except Exception:
+                self.send_json(500, {"ok": False, "error": "密碼更新失敗"})
+            return
 
         if path == "/api/search/synonyms":
             groups = body.get("groups")
