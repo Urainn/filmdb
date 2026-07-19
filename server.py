@@ -96,10 +96,7 @@ PASSWORD_RESET_LOG_SHEET = os.environ.get("PASSWORD_RESET_LOG_SHEET", "password_
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
-RESEND_API_KEY = os.environ.get(
-    "RESEND_API_KEY",
-    "re_78SeNX3U_76dwWGfvYHMhyNcdVEhpt5Q3",
-).strip()
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 RESEND_FROM_EMAIL = os.environ.get(
     "RESEND_FROM_EMAIL",
     "FilmDB <onboarding@resend.dev>",
@@ -761,10 +758,15 @@ def user_auth_save(auth):
             {"values": [row]},
         )
     else:
-        encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A:G")
+        # Sheets append may infer a partial table when hash/salt cells are empty
+        # and shift A:G values into the wrong columns. Write to an explicit row.
+        all_range = urllib.parse.quote(f"{USER_AUTH_SHEET}!A:G")
+        raw_rows = sheets_request("GET", f"/values/{all_range}").get("values", [])
+        next_row = len(raw_rows) + 1
+        encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A{next_row}:G{next_row}")
         sheets_request(
-            "POST",
-            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
             {"values": [row]},
         )
 
