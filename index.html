@@ -208,6 +208,9 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     <div class="nav-item" onclick="go('login',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="6" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>使用者登入
     </div>
+    <div class="nav-item" onclick="go('users',this)">
+      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5.5 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/><path d="M10.5 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/><path d="M1 14c0-2.5 2-4.5 4.5-4.5S10 11.5 10 14"/><path d="M10 9.5c2.5 0 4.5 2 4.5 4.5"/></svg>已登記用戶
+    </div>
     <div class="nav-item" onclick="go('sheets',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/></svg>APP 電影卡片
     </div>
@@ -701,6 +704,37 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
   </div>
 
+  <!-- REGISTERED USERS -->
+  <div id="panel-users" class="panel">
+    <div class="page-head">
+      <div>
+        <div class="page-title">已登記用戶</div>
+        <div class="page-sub">來自 <code>user_auth</code> 的帳戶列表；不顯示密碼</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-sm" onclick="loadRegisteredUsers(true)">↻ 重新載入</button>
+      </div>
+    </div>
+    <div class="search-row" style="max-width:420px">
+      <input class="search-inp" id="users-filter" type="search" placeholder="搜尋 Email…" oninput="filterRegisteredUsers()">
+    </div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:12px" id="registered-users-count">—</div>
+    <div class="tbl-wrap" style="max-width:900px">
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>狀態</th>
+            <th>更新時間</th>
+          </tr>
+        </thead>
+        <tbody id="registered-users-tbody">
+          <tr><td colspan="3" style="color:var(--text3)">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- SETTINGS -->
   <div id="panel-settings" class="panel">
     <div class="page-head">
@@ -777,7 +811,11 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
         <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">使用者密碼重設</div>
         <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-          使用者可在登入頁一鍵申請帳戶。此處顯示最近 20 筆申請、寄送及密碼更改紀錄；後台不保存可讀密碼。
+          使用者可在登入頁一鍵申請帳戶。此處顯示最近 20 筆申請、寄送及密碼更改紀錄；後台不保存可讀密碼。<br>
+          要寄給<strong>任意 Email</strong>：用 <code style="font-size:10px">apps_script_mail.gs</code> 部署 Google Apps Script，
+          再把網址／密語寫進試算表 <code style="font-size:10px">config</code>：
+          <code style="font-size:10px">mail_webhook_url</code>、<code style="font-size:10px">mail_webhook_secret</code>。
+          改表後無需動 Render。
         </div>
 
         <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
@@ -983,14 +1021,15 @@ function go(name, el) {
   if (el) el.classList.add('active');
   else {
     const map = {
-      list: 0, add: 1, 'search-yt': 2, login: 3, sheets: 4,
-      'user-analyze': 5, 'user-stats': 6, 'admin-push': 7, io: 8, settings: 9
+      list: 0, add: 1, 'search-yt': 2, login: 3, users: 4, sheets: 5,
+      'user-analyze': 6, 'user-stats': 7, 'admin-push': 8, io: 9, settings: 10
     };
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
   if (name === 'add') resetAdd();
   if (name === 'login') refreshLoginPanel();
+  if (name === 'users') loadRegisteredUsers(false);
   if (name === 'settings') {
     loadKeyStatus();
     loadSearchSynonyms();
@@ -3384,6 +3423,75 @@ function passwordResetStatusLabel(status) {
     password_changed: '使用者已更改密碼'
   };
   return labels[status] || status || '未知';
+}
+
+let _registeredUsersCache = [];
+
+function renderRegisteredUsers(users) {
+  _registeredUsersCache = Array.isArray(users) ? users : [];
+  filterRegisteredUsers();
+}
+
+function filterRegisteredUsers() {
+  const tbody = document.getElementById('registered-users-tbody');
+  const countEl = document.getElementById('registered-users-count');
+  const q = (document.getElementById('users-filter')?.value || '').trim().toLowerCase();
+  const users = _registeredUsersCache.filter(row => {
+    if (!q) return true;
+    const email = String(row.email || '').toLowerCase();
+    const name = String(row.userName || '').toLowerCase();
+    return email.includes(q) || name.includes(q);
+  });
+  if (countEl) {
+    countEl.textContent = q
+      ? `顯示 ${users.length} / 共 ${_registeredUsersCache.length} 位`
+      : `共 ${_registeredUsersCache.length} 位`;
+  }
+  if (!tbody) return;
+  if (!_registeredUsersCache.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text3)">尚無已登記用戶</td></tr>';
+    return;
+  }
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text3)">沒有符合的用戶</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(row => {
+    const at = String(row.updatedAt || '').replace('T', ' ').replace('Z', ' UTC');
+    const status = row.forcePasswordChange
+      ? '<span style="color:var(--amber)">須改密碼</span>'
+      : '<span style="color:var(--accent)">正常</span>';
+    return `<tr>`
+      + `<td class="td-title">${escapeHtml(row.email || row.userName || '—')}</td>`
+      + `<td>${status}</td>`
+      + `<td class="td-mono">${escapeHtml(at || '—')}</td>`
+      + `</tr>`;
+  }).join('');
+}
+
+async function loadRegisteredUsers(force = false) {
+  const tbody = document.getElementById('registered-users-tbody');
+  const key = getPasswordAdminKey();
+  if (!key) {
+    if (force && tbody) {
+      tbody.innerHTML = '<tr><td colspan="3" class="sbox show err">管理金鑰未設定</td></tr>';
+    }
+    return;
+  }
+  if (tbody) {
+    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--amber)">載入用戶列表…</td></tr>';
+  }
+  try {
+    const r = await apiFetch('/api/admin/users', {
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }
+    });
+    if (!r.ok) throw new Error(r.error || '載入失敗');
+    renderRegisteredUsers(r.users || []);
+  } catch (e) {
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red)">${escapeHtml(e.message)}</td></tr>`;
+    }
+  }
 }
 
 function renderPasswordResetRecords(records) {

@@ -2854,6 +2854,28 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(500, {"ok": False, "error": str(e)})
             return
 
+        elif path == "/api/admin/users":
+            if not admin_key_valid(self.headers.get("X-Admin-Key")):
+                self.send_json(401, {"ok": False, "error": "未授權"})
+                return
+            try:
+                users = []
+                for auth in user_auth_read_all():
+                    users.append({
+                        "userName": auth.get("userName") or "",
+                        "email": auth.get("email") or "",
+                        "forcePasswordChange": bool(auth.get("forcePasswordChange")),
+                        "updatedAt": auth.get("updatedAt") or "",
+                    })
+                users.sort(
+                    key=lambda u: (u.get("updatedAt") or "", u.get("email") or ""),
+                    reverse=True,
+                )
+                self.send_json(200, {"ok": True, "users": users, "count": len(users)})
+            except Exception as e:
+                self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
         elif path in ("/api/admin/push/list", "/api/admin/multi/overview"):
             try:
                 self.send_json(200, {"ok": True, **admin_push_dashboard()})
