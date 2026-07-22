@@ -957,9 +957,28 @@ function readYearInput(id) {
 }
 
 function resolveSaveYear(existing, item, analyzeData) {
-  const py = String(analyzeData?.year || '').trim();
-  if (/^\d{4}$/.test(py)) return py;
-  return movieYear(existing) || item?.year || yearFromDate(item?.publishedAt) || '';
+  // Sync fallback only. Prefer TMDB via resolveTheatricalYear(); never trust AI year.
+  const existingY = String(existing?.year || item?.year || '').trim();
+  if (/^\d{4}$/.test(existingY)) return existingY;
+  return '';
+}
+
+/** Theatrical release year from TMDB only (not YouTube upload / AI guess). */
+async function resolveTheatricalYear(item, existing) {
+  const payload = {
+    ...(existing || {}),
+    ...(item || {}),
+    title: (item && item.title) || (existing && existing.title) || '',
+    tmdbId: (item && item.tmdbId) || (existing && existing.tmdbId) || '',
+    mediaType: (item && item.mediaType) || (existing && existing.mediaType) || 'movie',
+    ytId: (item && item.ytId) || (existing && existing.ytId) || ''
+  };
+  try {
+    const { year } = await lookupTheatricalYear(payload);
+    if (/^\d{4}$/.test(year)) return year;
+  } catch (e) {}
+  const keep = String(existing?.year || item?.year || '').trim();
+  return /^\d{4}$/.test(keep) ? keep : '';
 }
 let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
@@ -1715,6 +1734,11 @@ async function runReanalyzeQueue(items) {
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
         const cleanTitle = item.source === 'tmdb' ? (item.title || '') : await lookupYoutubeCleanTitle(item);
+        const titleFinal = cleanTitle || m.title;
+        const theatricalYear = await resolveTheatricalYear(
+          { ...item, title: titleFinal },
+          m
+        );
         const updated = {
           ...m,
           id: m.id,
@@ -1723,7 +1747,7 @@ async function runReanalyzeQueue(items) {
           tmdbId: item.tmdbId,
           ytId: item.ytId,
           url: item.url,
-          title: cleanTitle || m.title,
+          title: titleFinal,
           desc: p.desc || m.desc || '',
           poster: item.poster,
           thumb: item.thumb,
@@ -1733,8 +1757,15 @@ async function runReanalyzeQueue(items) {
           genres: p.genres || [],
           emotions: p.emotions || [],
           atmospheres: p.atmospheres || [],
-          year: resolveSaveYear(m, item, p)
+          year: theatricalYear
         };
+        if (theatricalYear) {
+          const pub = String(m.publishedAt || '');
+          // Replace YouTube-upload-style dates when we have a real theatrical year
+          if (!pub || pub.startsWith(String(m.year || '') + '-') || yearFromDate(pub) !== theatricalYear) {
+            updated.publishedAt = `${theatricalYear}-01-01`;
+          }
+        }
         await apiFetch('/db', { method: 'POST', body: JSON.stringify(updated) });
         reanalyzeSelectedIds.delete(m.id);
         successCount++;
@@ -1927,9 +1958,16 @@ async function analyze() {
   if (duplicate) p._overwriteId = duplicate.id;
 
   document.getElementById('f-title').value = curVideoTitle || p.title || '';
-  const py = String(p.year || '').trim();
-  const analyzedYear = /^\d{4}$/.test(py) ? py : yearFromDate(py);
-  document.getElementById('f-year').value = analyzedYear || curVideoYear || document.getElementById('f-year').value || '';
+  // Theatrical year from TMDB; never use AI / YouTube upload year as release year
+  const titleForYear = document.getElementById('f-title').value;
+  let yearVal = await resolveTheatricalYear(
+    { title: titleForYear, tmdbId: '', mediaType: 'movie', ytId: curYtId },
+    duplicate || null
+  );
+  if (!yearVal) {
+    yearVal = movieYear(duplicate) || '';
+  }
+  document.getElementById('f-year').value = yearVal;
   document.getElementById('f-desc').value = p.desc || '';
   document.getElementById('f-scenes-main').value = join(p.scenes_main);
   document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
@@ -2110,7 +2148,8 @@ async function searchTmdbYearByTitle(title, mediaType = 'movie') {
   }
 }
 
-async function lookupReleaseYear(item) {
+/** TMDB theatrical year only — never YouTube upload date. */
+async function lookupTheatricalYear(item) {
   const parsed = parseTmdbFromYtId(item.ytId);
   const mediaType = item.mediaType || (parsed && parsed.mediaType) || 'movie';
   const tmdbId = item.tmdbId || (parsed && parsed.tmdbId);
@@ -2130,21 +2169,15 @@ async function lookupReleaseYear(item) {
     }
   }
 
-  const fromPub = yearFromDate(item.publishedAt);
-  if (fromPub) return { year: fromPub, source: '既有日期' };
+  return { year: '', source: '' };
+}
 
-  if (isYoutubeVideoId(item.ytId)) {
-    try {
-      const info = await apiFetch('/youtube/info', {
-        method: 'POST',
-        body: JSON.stringify({ ytId: item.ytId, url: item.url || '' })
-      });
-      if (info.ok) {
-        const y = info.year || yearFromDate(info.publishedAt);
-        if (y) return { year: y, source: 'YouTube（上傳年）' };
-      }
-    } catch (e) {}
-  }
+async function lookupReleaseYear(item) {
+  const tmdb = await lookupTheatricalYear(item);
+  if (tmdb.year) return tmdb;
+
+  const keep = String(item.year || '').trim();
+  if (/^\d{4}$/.test(keep)) return { year: keep, source: '既有年份' };
 
   return { year: '', source: '' };
 }
@@ -2154,7 +2187,7 @@ async function batchSyncAllYears() {
   if (!db.length) return toast('資料庫是空的', 'err');
   if (!TMDB_API_KEY) return toast('請先設定 TMDB_API_KEY', 'err');
 
-  if (!confirm(`即將為全庫 ${db.length} 部電影同步「上映年份」。\n\n優先：TMDB 上映年 → 資料內日期 → YouTube（備援）\n\n確定開始？`)) return;
+  if (!confirm(`即將為全庫 ${db.length} 部電影同步「上映年份」。\n\n來源：僅 TMDB 上映年（不用 YouTube 上傳年）\n\n確定開始？`)) return;
   const modeFillEmpty = !confirm(
     `第二個選項：\n\n按「確定」= 全部重新查詢（已有年份也會依 TMDB 更新）\n按「取消」= 僅補齊目前沒有年份的電影`
   );
@@ -2957,13 +2990,18 @@ async function ytBatchAnalyze() {
         const p = analyzeRes.data;
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
+        const entryTitle = cleanMovieTitle(item.title) || item.title || p.title;
+        const theatricalYear = await resolveTheatricalYear(
+          { ...item, title: entryTitle },
+          null
+        );
         const entry = {
           source: item.source || 'youtube',
           mediaType: item.mediaType || 'movie',
           tmdbId: item.tmdbId || '',
           ytId: item.ytId || `tmdb-${item.mediaType || 'movie'}-${item.tmdbId}`,
           url: item.url,
-          title: cleanMovieTitle(item.title) || item.title || p.title,
+          title: entryTitle,
           desc: p.desc || '',
           poster: item.poster || item.thumb || '',
           thumb: item.thumb || item.poster || '',
@@ -2973,8 +3011,10 @@ async function ytBatchAnalyze() {
           emotions: p.emotions || [],
           atmospheres: p.atmospheres || [],
           actors: (p.cast || p.actors || []).join('、'),
-          year: resolveSaveYear(null, item, p),
-          publishedAt: item.publishedAt || ''
+          year: theatricalYear || String(item.year || '').trim() || '',
+          publishedAt: theatricalYear
+            ? `${theatricalYear}-01-01`
+            : (item.publishedAt || '')
         };
 
         const dbRes = await apiFetch('/db', {
