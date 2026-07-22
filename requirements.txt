@@ -1,6 +1,8 @@
 # Render 執行 python server.py 只需要這個（Google Sheets JWT 簽章）
 cryptography
 certifi
+twelvelabs==1.3.0
+yt-dlp
 
 # 以下為舊版 app.py / recommend.py 本機用，線上部署不必安裝：
 # flask

@@ -295,12 +295,20 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
   <!-- ADD -->
   <div id="panel-add" class="panel">
     <div class="page-head">
-      <div><div class="page-title">新增電影</div><div class="page-sub">Gemini 分析完後自動存入雲端，所有裝置立即可見</div></div>
+      <div><div class="page-title">新增電影</div><div class="page-sub">分析完後自動存入雲端，所有裝置立即可見</div></div>
     </div>
     <div class="steps">
       <div class="step s-active" id="s1">
         <div class="step-head"><div class="step-n">1</div><div class="step-title">輸入 YouTube 預告片網址</div></div>
-        <div class="step-desc">貼上完整連結，Gemini 會直接分析影片產生場景、類型、情緒與氛圍標籤</div>
+        <div class="step-desc">貼上完整連結，系統會分析影片產生場景、類型、情緒與氛圍標籤</div>
+        <div class="field">
+          <label class="fl">分析引擎</label>
+          <select class="fi" id="analyze-provider" style="max-width:320px">
+            <option value="auto">自動（有 TwelveLabs 先用）</option>
+            <option value="twelvelabs">TwelveLabs</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
         <div class="field">
           <input class="fi" id="f-url" type="text" placeholder="https://www.youtube.com/watch?v=..." oninput="onUrl()">
           <div id="yt-tag" style="min-height:20px;margin-top:4px"></div>
@@ -308,10 +316,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <button class="btn btn-accent" id="btn-analyze" onclick="analyze()" disabled>✦ 開始分析影片</button>
       </div>
       <div class="step" id="s2" style="display:none">
-        <div class="step-head"><div class="step-n">2</div><div class="step-title">Gemini 分析中</div></div>
+        <div class="step-head"><div class="step-n">2</div><div class="step-title">分析中</div></div>
         <div class="sbox show loading" id="analyze-status">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <span class="spin"></span><span id="analyze-msg">Gemini 正在分析影片內容...</span>
+            <span class="spin"></span><span id="analyze-msg">正在分析影片內容...</span>
           </div>
           <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:4px;overflow:hidden">
             <div id="progress-bar" style="height:100%;background:var(--amber);border-radius:99px;width:0%;transition:width 0.8s ease"></div>
@@ -324,7 +332,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
       <div class="step" id="s3" style="display:none">
         <div class="step-head"><div class="step-n">3</div><div class="step-title">確認並儲存標籤</div></div>
-        <div class="step-desc">Gemini 從影片直接產生的標籤，可以直接修改</div>
+        <div class="step-desc">從影片直接產生的標籤，可以直接修改</div>
         <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="f-title" type="text"></div>
         <div class="field">
           <label class="fl">上映年份</label>
@@ -809,6 +817,34 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
 
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
+        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">TwelveLabs 影片分析</div>
+        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
+          作為 Gemini 之外的分析引擎。Key 存在試算表 <code style="font-size:10px">config</code>
+          （<code style="font-size:10px">twelvelabs_api_key</code> / <code style="font-size:10px">analyze_provider</code>），無需改 Render。<br>
+          申請：<a href="https://www.twelvelabs.io/" target="_blank" style="color:var(--blue)">twelvelabs.io</a>
+          · YouTube 會先下載再上傳分析（較慢）。
+        </div>
+        <div class="field">
+          <label class="fl">預設分析引擎</label>
+          <select class="fi" id="settings-analyze-provider">
+            <option value="auto">自動（有 TwelveLabs 先用）</option>
+            <option value="twelvelabs">TwelveLabs</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="fl">TwelveLabs API Key</label>
+          <input class="fi" id="twelvelabs-key-input" type="password" autocomplete="off" placeholder="貼上 API Key（留空則不變更）">
+          <div class="fhint" id="twelvelabs-key-hint">尚未設定</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-accent" onclick="saveAnalyzeSettings()">儲存分析設定</button>
+          <button class="btn btn-sm" onclick="loadAnalyzeSettings(true)">重新載入</button>
+        </div>
+        <div class="sbox" id="analyze-settings-status" style="margin-top:10px"></div>
+      </div>
+
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
         <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">使用者密碼重設</div>
         <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
           使用者可在登入頁一鍵申請帳戶。此處顯示最近 20 筆申請、寄送及密碼更改紀錄；後台不保存可讀密碼。<br>
@@ -1027,13 +1063,17 @@ function go(name, el) {
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
-  if (name === 'add') resetAdd();
+  if (name === 'add') {
+    resetAdd();
+    loadAnalyzeSettings(false);
+  }
   if (name === 'login') refreshLoginPanel();
   if (name === 'users') loadRegisteredUsers(false);
   if (name === 'settings') {
     loadKeyStatus();
     loadSearchSynonyms();
     loadPasswordResetRecords(false);
+    loadAnalyzeSettings(false);
   }
   if (name === 'admin-push') loadAdminPushDashboard();
   if (name === 'user-stats') loadUserStats();
@@ -1840,7 +1880,10 @@ async function analyze() {
     try {
       r = await apiFetch('/analyze', {
         method: 'POST',
-        body: JSON.stringify({ url: ytUrl })
+        body: JSON.stringify({
+          url: ytUrl,
+          provider: document.getElementById('analyze-provider')?.value || 'auto'
+        })
       });
       if (r.ok) break;
       if (r.error && (r.error.includes('503') || r.error.includes('429'))) {
@@ -2850,7 +2893,11 @@ async function analyzeWithRetry(item, msgEl, detailEl, completed, total) {
     try {
       const analyzeRes = await apiFetch(item.source === 'tmdb' ? '/tmdb/analyze' : '/analyze', {
         method: 'POST',
-        body: JSON.stringify(item.source === 'tmdb' ? { item } : { url })
+        body: JSON.stringify(
+          item.source === 'tmdb'
+            ? { item, provider: document.getElementById('analyze-provider')?.value || localStorage.getItem('filmdb_analyze_provider') || 'auto' }
+            : { url, provider: document.getElementById('analyze-provider')?.value || localStorage.getItem('filmdb_analyze_provider') || 'auto' }
+        )
       });
 
       if (analyzeRes.ok) return analyzeRes;
@@ -3490,6 +3537,62 @@ async function loadRegisteredUsers(force = false) {
   } catch (e) {
     if (tbody) {
       tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red)">${escapeHtml(e.message)}</td></tr>`;
+    }
+  }
+}
+
+async function loadAnalyzeSettings(force = false) {
+  const hint = document.getElementById('twelvelabs-key-hint');
+  const sel = document.getElementById('settings-analyze-provider');
+  const addSel = document.getElementById('analyze-provider');
+  try {
+    const r = await apiFetch('/config/analyze');
+    if (!r.ok) throw new Error(r.error || '載入失敗');
+    if (sel) sel.value = r.provider || 'auto';
+    if (addSel) addSel.value = r.provider || 'auto';
+    localStorage.setItem('filmdb_analyze_provider', r.provider || 'auto');
+    if (hint) {
+      hint.textContent = r.twelvelabsConfigured
+        ? `已設定（${r.twelvelabsKeyMasked || '****'}）· 模型 ${r.model || 'pegasus1.5'}`
+        : '尚未設定 TwelveLabs Key';
+    }
+  } catch (e) {
+    if (force && hint) hint.textContent = e.message || '載入失敗';
+  }
+}
+
+async function saveAnalyzeSettings() {
+  const status = document.getElementById('analyze-settings-status');
+  const provider = document.getElementById('settings-analyze-provider')?.value || 'auto';
+  const key = document.getElementById('twelvelabs-key-input')?.value?.trim() || '';
+  if (status) {
+    status.className = 'sbox show loading';
+    status.textContent = '儲存中…';
+  }
+  try {
+    const body = { provider };
+    if (key) body.twelvelabsApiKey = key;
+    const r = await apiFetch('/config/analyze', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(r.error || '儲存失敗');
+    localStorage.setItem('filmdb_analyze_provider', r.provider || provider);
+    const addSel = document.getElementById('analyze-provider');
+    if (addSel) addSel.value = r.provider || provider;
+    if (document.getElementById('twelvelabs-key-input')) {
+      document.getElementById('twelvelabs-key-input').value = '';
+    }
+    await loadAnalyzeSettings(true);
+    if (status) {
+      status.className = 'sbox show ok';
+      status.textContent = r.message || '已儲存';
+    }
+    toast('分析設定已儲存', 'ok');
+  } catch (e) {
+    if (status) {
+      status.className = 'sbox show err';
+      status.textContent = e.message || '儲存失敗';
     }
   }
 }

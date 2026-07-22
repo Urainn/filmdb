@@ -27,3 +27,7 @@ services:
         sync: false
       - key: APP_LOGIN_URL
         sync: false
+      - key: TWELVELABS_API_KEY
+        sync: false
+      - key: ANALYZE_PROVIDER
+        value: auto
