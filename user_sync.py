@@ -10,6 +10,7 @@ from typing import Any
 from recommend_engine import (
     TEMP_DISLIKE,
     TEMP_LIKE,
+    TEMP_NEUTRAL,
     clamp_temperature,
     global_user_stats,
     summarize_profile,
@@ -92,7 +93,7 @@ def push_is_stale(prefs: dict, feed: dict | None) -> bool:
     temps = temperature_map_from_prefs(prefs)
     if not temps:
         return False
-    warm = any(t > 50 for t in temps.values())
+    warm = any(t > TEMP_NEUTRAL for t in temps.values())
     if not feed or not feed.get("publishedAt"):
         return warm
     updated = prefs.get("updatedAt") or ""

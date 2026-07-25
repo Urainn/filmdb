@@ -44,6 +44,7 @@ from recommend_engine import (
     clamp_temperature,
     global_user_stats,
     movie_emotion_atmosphere_tags,
+    prefs_ready_for_push,
     ranked_movies,
     summarize_profile,
 )
@@ -169,7 +170,7 @@ PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物�
 請嚴格按照以下格式：
 {
   "title": "電影中文片名",
-  "year": "上映年份（四位數字，例如 2024）",
+  "year": "電影上映年份（四位數字，例如 2024；指院線／正式上映年，不是預告片上傳年、不是分析當下年份）",
   "desc": "25字內的劇情簡介",
   "scenes_main": ["6到10個主要場景，只填具體地點／空間名稱"],
   "scenes_sub": ["6到10個次要場景，只填具體地點／空間名稱"],
@@ -743,6 +744,7 @@ def set_user_temperature(user_name, movie_id, temperature):
     temps[movie_id] = clamp_temperature(temperature)
     u["temperatures"] = temps
     normalized = normalize_prefs(u)
+    normalized["updatedAt"] = utc_now()
     with _user_lock:
         user_behavior[user_name] = normalized
     persist_user_prefs(user_name)
@@ -1562,8 +1564,8 @@ def admin_republish_stale_users(limit=20, message=""):
         if not push_is_stale(prefs, feed):
             results.append({"userName": name, "ok": False, "skipped": True, "reason": "推送仍為最新"})
             continue
-        if not prefs.get("like"):
-            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無喜歡"})
+        if not prefs_ready_for_push(prefs):
+            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無偏熱評分"})
             continue
         try:
             doc = admin_publish_push(name, limit=limit, message=message)
@@ -1627,7 +1629,7 @@ def handle_sync_push(body):
     limit = int(body.get("limit") or 20)
     message = (body.get("message") or "").strip()
     published = None
-    if auto_publish and merged.get("like"):
+    if auto_publish and prefs_ready_for_push(merged):
         published = admin_publish_push(user_name, limit=limit, message=message)
     feed = push_feed_get(user_name)
     movies = db_read()
@@ -1649,12 +1651,12 @@ def admin_publish_push_all(limit=20, message=""):
         names = list(user_behavior.keys())
     for name in names:
         prefs = user_behavior.get(name) or {}
-        if not (prefs.get("like")):
+        if not prefs_ready_for_push(prefs):
             results.append({
                 "userName": name,
                 "ok": False,
                 "skipped": True,
-                "error": "尚無喜歡記錄",
+                "error": "尚無偏熱評分（需有溫度 > 50）",
             })
             continue
         try:

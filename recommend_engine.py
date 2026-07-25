@@ -5,6 +5,7 @@ Used by server.py for /api/sheets_card/recommend and /api/user/analyze.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from typing import Any
 
@@ -26,6 +27,11 @@ TEMP_DISLIKE = 15
 TEMP_HOT = 67
 TEMP_COLD = 33
 TEMP_BLOCK = 20
+
+# 多樣性：已選同類型每多一部，分數懲罰係數
+DIVERSITY_GENRE_PENALTY = 0.32
+# 正規化後可視為「有匹配」的最低分
+SCORE_EPS = 1e-6
 
 
 def clamp_temperature(value) -> float:
@@ -69,6 +75,12 @@ def sync_like_dislike_from_temperatures(temps: dict[str, float]) -> tuple[list[s
     return like, dislike
 
 
+def prefs_ready_for_push(user_prefs: dict) -> bool:
+    """True when user has any warmer-than-neutral rating (aligned with ranked_movies)."""
+    temps = temperature_map_from_prefs(user_prefs)
+    return any(t > TEMP_NEUTRAL for t in temps.values())
+
+
 def _tag_list(value) -> list[str]:
     return [str(x).strip() for x in (value or []) if str(x).strip()]
 
@@ -96,6 +108,50 @@ def _movie_tags(movie: dict) -> dict[str, list[str]]:
     }
 
 
+def _primary_genre(movie: dict) -> str:
+    genres = _movie_tags(movie)["genres"]
+    return genres[0] if genres else "其他"
+
+
+def _l1_normalize_profile(profile: dict[str, Counter]) -> dict[str, Counter]:
+    """Normalize each tag family so weights sum to 1 — prevents rating-count inflation."""
+    out: dict[str, Counter] = {}
+    for key, counter in profile.items():
+        total = float(sum(counter.values()))
+        if total <= 0:
+            out[key] = Counter()
+        else:
+            out[key] = Counter({tag: float(w) / total for tag, w in counter.items()})
+    return out
+
+
+def _build_catalog_idf(movies: list[dict]) -> dict[str, dict[str, float]]:
+    """Rare tags weigh more; ubiquitous tags (e.g. 劇情) are dampened."""
+    n = max(1, len(movies))
+    df: dict[str, Counter] = {
+        "genres": Counter(),
+        "emotions": Counter(),
+        "atmospheres": Counter(),
+        "scenes": Counter(),
+    }
+    for movie in movies:
+        tags = _movie_tags(movie)
+        for key in df:
+            for tag in set(tags[key]):
+                df[key][tag] += 1
+    idf: dict[str, dict[str, float]] = {}
+    for key, counter in df.items():
+        idf[key] = {
+            tag: math.log((n + 1.0) / (cnt + 1.0)) + 1.0
+            for tag, cnt in counter.items()
+        }
+    return idf
+
+
+def _idf(idf: dict[str, dict[str, float]], key: str, tag: str) -> float:
+    return float(idf.get(key, {}).get(tag, 1.0))
+
+
 def build_tag_profile(
     movies_by_id: dict[str, dict],
     movie_ids: list[str],
@@ -121,8 +177,13 @@ def build_tag_profile(
 def build_temperature_profiles(
     movies_by_id: dict[str, dict],
     temp_map: dict[str, float],
+    *,
+    normalize: bool = True,
 ) -> tuple[dict[str, Counter], dict[str, Counter]]:
-    """Warm profile from hot ratings; cold profile from cold ratings."""
+    """Warm profile from hot ratings; cold profile from cold ratings.
+
+    Ratings at or below TEMP_BLOCK amplify cold tags (harder avoidance).
+    """
     warm = {
         "genres": Counter(),
         "emotions": Counter(),
@@ -146,9 +207,13 @@ def build_temperature_profiles(
                 for tag in tags[key]:
                     warm[key][tag] += warm_w
         if cold_w > 0:
+            # 極冷片：排斥訊號加強，對應 TEMP_BLOCK
+            boost = 1.65 if temp <= TEMP_BLOCK else 1.0
             for key in cold:
                 for tag in tags[key]:
-                    cold[key][tag] += cold_w
+                    cold[key][tag] += cold_w * boost
+    if normalize:
+        return _l1_normalize_profile(warm), _l1_normalize_profile(cold)
     return warm, cold
 
 
@@ -205,6 +270,7 @@ def summarize_profile(movies_by_id: dict[str, dict], user_prefs: dict) -> dict:
             "max": 100,
             "hotThreshold": TEMP_HOT,
             "coldThreshold": TEMP_COLD,
+            "blockThreshold": TEMP_BLOCK,
         },
     }
 
@@ -215,8 +281,10 @@ def score_movie(
     cold_profile: dict[str, Counter],
     user_prefs: dict,
     weights: dict | None = None,
+    idf: dict[str, dict[str, float]] | None = None,
 ) -> tuple[float, list[str]]:
     weights = weights or DEFAULT_WEIGHTS
+    idf = idf or {}
     mid = movie.get("id", "")
     temp_map = temperature_map_from_prefs(user_prefs)
     if mid in temp_map:
@@ -225,55 +293,132 @@ def score_movie(
 
     tags = _movie_tags(movie)
     score = 0.0
-    reasons: list[str] = []
-    seen_reasons: set[str] = set()
+    like_reasons: list[str] = []
+    avoid_reasons: list[str] = []
+    seen_like: set[str] = set()
+    seen_avoid: set[str] = set()
 
-    def add_reason(prefix: str, tag: str, contrib: float) -> None:
+    def add_like(prefix: str, tag: str, contrib: float) -> None:
         key = f"{prefix}:{tag}"
-        if key in seen_reasons or contrib <= 0:
+        if key in seen_like or contrib <= SCORE_EPS:
             return
-        seen_reasons.add(key)
-        reasons.append(f"{prefix}「{tag}」")
+        seen_like.add(key)
+        like_reasons.append(f"{prefix}「{tag}」")
 
-    for g in tags["genres"]:
-        w = warm_profile["genres"].get(g, 0) * weights["like_genre"]
-        if w:
-            score += w
-            add_reason("類型", g, w)
-    for e in tags["emotions"]:
-        w = warm_profile["emotions"].get(e, 0) * weights["like_emotion"]
-        if w:
-            score += w
-            add_reason("情緒", e, w)
-    for a in tags["atmospheres"]:
-        w = warm_profile["atmospheres"].get(a, 0) * weights["like_atmosphere"]
-        if w:
-            score += w
-            add_reason("氛圍", a, w)
-    for s in tags["scenes"]:
-        w = warm_profile["scenes"].get(s, 0) * weights["like_scene"]
-        if w:
-            score += w
-            add_reason("場景", s, w)
+    def add_avoid(tag: str, contrib: float) -> None:
+        if tag in seen_avoid or contrib <= SCORE_EPS:
+            return
+        seen_avoid.add(tag)
+        avoid_reasons.append(f"避開「{tag}」")
 
-    for g in tags["genres"]:
-        w = cold_profile["genres"].get(g, 0) * weights["dislike_genre"]
-        if w:
-            score -= w
-    for e in tags["emotions"]:
-        w = cold_profile["emotions"].get(e, 0) * weights["dislike_emotion"]
-        if w:
-            score -= w
-    for a in tags["atmospheres"]:
-        w = cold_profile["atmospheres"].get(a, 0) * weights["dislike_atmosphere"]
-        if w:
-            score -= w
-    for s in tags["scenes"]:
-        w = cold_profile["scenes"].get(s, 0) * weights["dislike_scene"]
-        if w:
-            score -= w
+    like_keys = (
+        ("genres", "類型", "like_genre"),
+        ("emotions", "情緒", "like_emotion"),
+        ("atmospheres", "氛圍", "like_atmosphere"),
+        ("scenes", "場景", "like_scene"),
+    )
+    for family, prefix, wkey in like_keys:
+        for tag in tags[family]:
+            contrib = (
+                warm_profile[family].get(tag, 0)
+                * weights[wkey]
+                * _idf(idf, family, tag)
+            )
+            if contrib:
+                score += contrib
+                add_like(prefix, tag, contrib)
 
-    return score, reasons[:6]
+    dislike_keys = (
+        ("genres", "dislike_genre"),
+        ("emotions", "dislike_emotion"),
+        ("atmospheres", "dislike_atmosphere"),
+        ("scenes", "dislike_scene"),
+    )
+    for family, wkey in dislike_keys:
+        for tag in tags[family]:
+            contrib = (
+                cold_profile[family].get(tag, 0)
+                * weights[wkey]
+                * _idf(idf, family, tag)
+            )
+            if contrib:
+                score -= contrib
+                # 類型排斥較有解釋價值
+                if family == "genres":
+                    add_avoid(tag, contrib)
+
+    reasons = like_reasons[:4] + avoid_reasons[:2]
+    return score, reasons
+
+
+def _tag_richness(movie: dict) -> int:
+    tags = _movie_tags(movie)
+    return (
+        len(tags["genres"])
+        + len(tags["emotions"])
+        + len(tags["atmospheres"])
+        + min(4, len(tags["scenes"]))
+    )
+
+
+def _cold_start_ranked(
+    movies: list[dict],
+    rated: set[str],
+    limit: int,
+) -> list[tuple[float, dict, list[str]]]:
+    """Diverse exploration: well-tagged films, round-robin by primary genre."""
+    pool = [m for m in movies if m.get("id") and m.get("id") not in rated]
+    pool.sort(key=_tag_richness, reverse=True)
+    by_genre: dict[str, list[dict]] = {}
+    for movie in pool:
+        by_genre.setdefault(_primary_genre(movie), []).append(movie)
+
+    out: list[tuple[float, dict, list[str]]] = []
+    while len(out) < limit and by_genre:
+        emptied: list[str] = []
+        for genre in list(by_genre.keys()):
+            if len(out) >= limit:
+                break
+            bucket = by_genre[genre]
+            if not bucket:
+                emptied.append(genre)
+                continue
+            movie = bucket.pop(0)
+            out.append((0.0, movie, ["探索推薦"]))
+            if not bucket:
+                emptied.append(genre)
+        for genre in emptied:
+            by_genre.pop(genre, None)
+    return out
+
+
+def _diversify_ranked(
+    scored: list[tuple[float, dict, list[str]]],
+    limit: int,
+) -> list[tuple[float, dict, list[str]]]:
+    """Greedy re-rank: keep high scores but avoid flooding one genre."""
+    if len(scored) <= limit:
+        return scored
+
+    remaining = list(scored)
+    picked: list[tuple[float, dict, list[str]]] = []
+    genre_counts: Counter = Counter()
+
+    while remaining and len(picked) < limit:
+        best_i = 0
+        best_adj = float("-inf")
+        for i, (s, movie, _reasons) in enumerate(remaining):
+            genres = _movie_tags(movie)["genres"] or ["其他"]
+            overlap = sum(genre_counts[g] for g in genres)
+            adj = s - DIVERSITY_GENRE_PENALTY * overlap * (abs(s) * 0.2 + 1.0)
+            if adj > best_adj:
+                best_adj = adj
+                best_i = i
+        item = remaining.pop(best_i)
+        picked.append(item)
+        for g in (_movie_tags(item[1])["genres"] or ["其他"]):
+            genre_counts[g] += 1
+    return picked
 
 
 def ranked_movies(
@@ -292,24 +437,30 @@ def ranked_movies(
     }
 
     if not warm_ids:
-        rated = set(temp_map.keys())
-        pool = [m for m in movies if m.get("id") not in rated]
-        return [(0.0, m, []) for m in pool[:limit]], meta
+        ranked = _cold_start_ranked(movies, set(temp_map.keys()), limit)
+        meta["candidateCount"] = len(ranked)
+        meta["diversified"] = True
+        return ranked, meta
 
     warm_prof, cold_prof = build_temperature_profiles(movies_by_id, temp_map)
+    idf = _build_catalog_idf(movies)
     scored: list[tuple[float, dict, list[str]]] = []
 
     for movie in movies:
         mid = movie.get("id")
         if not mid or mid in temp_map:
             continue
-        s, reasons = score_movie(movie, warm_prof, cold_prof, user_prefs, weights)
-        if s > 0:
+        s, reasons = score_movie(
+            movie, warm_prof, cold_prof, user_prefs, weights, idf=idf
+        )
+        if s > SCORE_EPS:
             scored.append((s, movie, reasons))
 
     scored.sort(key=lambda x: -x[0])
     meta["candidateCount"] = len(scored)
-    return scored[:limit], meta
+    diversified = _diversify_ranked(scored, limit)
+    meta["diversified"] = True
+    return diversified, meta
 
 
 def global_user_stats(all_users: dict[str, dict], movies: list[dict]) -> dict:
