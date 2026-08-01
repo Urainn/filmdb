@@ -6,7 +6,6 @@ FilmDB cloud server - Google Sheets version.
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-import socket
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -14,19 +13,10 @@ import json
 import re
 import os
 import time
-import tempfile
-import shutil
 import threading
 import base64
 import sys
 import ssl
-import hashlib
-import hmac
-import secrets
-import html
-import smtplib
-from email.message import EmailMessage
-from email.utils import formataddr, make_msgid
 import traceback
 
 try:
@@ -44,7 +34,6 @@ from recommend_engine import (
     clamp_temperature,
     global_user_stats,
     movie_emotion_atmosphere_tags,
-    prefs_ready_for_push,
     ranked_movies,
     summarize_profile,
 )
@@ -68,7 +57,9 @@ from room_sync import (
     normalize_room,
     normalize_room_code,
     room_add_member,
+    room_merge_snapshots,
     room_public_view,
+    room_remove_member,
     rooms_overview,
 )
 
@@ -98,59 +89,9 @@ USER_PREFS_SHEET = os.environ.get("USER_PREFS_SHEET", "user_prefs")
 PUSH_FEED_SHEET = os.environ.get("PUSH_FEED_SHEET", "push_feed")
 USER_EVENTS_SHEET = os.environ.get("USER_EVENTS_SHEET", "user_events")
 ROOMS_SHEET = os.environ.get("ROOMS_SHEET", "multi_rooms")
-USER_AUTH_SHEET = os.environ.get("USER_AUTH_SHEET", "user_auth")
-PASSWORD_RESET_LOG_SHEET = os.environ.get("PASSWORD_RESET_LOG_SHEET", "password_reset_log")
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
-RESEND_FROM_EMAIL = os.environ.get(
-    "RESEND_FROM_EMAIL",
-    "FilmDB <onboarding@resend.dev>",
-).strip()
-GMAIL_SMTP_USER = os.environ.get("GMAIL_SMTP_USER", "").strip()
-GMAIL_SMTP_PASSWORD = "".join(
-    os.environ.get("GMAIL_SMTP_PASSWORD", "").split()
-)
-GMAIL_FROM_NAME = os.environ.get("GMAIL_FROM_NAME", "FilmDB").strip() or "FilmDB"
-TWELVELABS_API_KEY = os.environ.get("TWELVELABS_API_KEY", "").strip()
-ANALYZE_PROVIDER = (
-    os.environ.get("ANALYZE_PROVIDER", "auto").strip().lower() or "auto"
-)
-ADMIN_API_KEY = os.environ.get(
-    "ADMIN_API_KEY",
-    "FLTWVls0pzrSlXHxjrJepha3useQg4NN",
-).strip()
-APP_NAME = os.environ.get("APP_NAME", "FilmDB").strip() or "FilmDB"
-APP_LOGIN_URL = os.environ.get("APP_LOGIN_URL", "").strip()
-TWELVELABS_MODEL = os.environ.get("TWELVELABS_MODEL", "pegasus1.5").strip() or "pegasus1.5"
-FILM_ANALYSIS_JSON_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "title": {"type": "string"},
-        "year": {"type": "string"},
-        "desc": {"type": "string"},
-        "scenes_main": {"type": "array", "items": {"type": "string"}},
-        "scenes_sub": {"type": "array", "items": {"type": "string"}},
-        "genres": {"type": "array", "items": {"type": "string"}},
-        "emotions": {"type": "array", "items": {"type": "string"}},
-        "atmospheres": {"type": "array", "items": {"type": "string"}},
-        "cast": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": [
-        "title",
-        "desc",
-        "scenes_main",
-        "scenes_sub",
-        "genres",
-        "emotions",
-        "atmospheres",
-        "cast",
-    ],
-    "additionalProperties": True,
-}
-PASSWORD_PBKDF2_ITERATIONS = 310_000
-PASSWORD_RESET_COOLDOWN_SECONDS = 60
 
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -165,42 +106,27 @@ MODEL_FALLBACKS = [
 PROMPT = """仔細看完這個電影預告片，然後只輸出一個 JSON 物件，絕對不要加任何說明文字或 markdown。
 這是一個給展覽觀眾搜尋電影用的資料庫，請產生「好搜尋、可策展、可聯想」的標籤。
 不要只給很少的類型詞；請補足題材、情緒、敘事母題、視覺質感、社會議題、角色關係與觀眾可能會搜尋的關鍵詞。
-優先選用下方詞庫中貼切的詞，也可自創新詞，但必須是台灣觀眾看得懂的繁體中文短詞。
 
 請嚴格按照以下格式：
 {
   "title": "電影中文片名",
-  "year": "電影上映年份（四位數字，例如 2024；指院線／正式上映年，不是預告片上傳年、不是分析當下年份）",
+  "year": "上映年份（四位數字，例如 2024）",
   "desc": "25字內的劇情簡介",
-  "scenes_main": ["6到10個主要場景，只填具體地點／空間名稱"],
-  "scenes_sub": ["6到10個次要場景，只填具體地點／空間名稱"],
-  "genres": ["10到16個類型與題材關鍵詞"],
-  "emotions": ["8到12個情緒標籤，描述觀眾觀影時的情緒反應"],
-  "atmospheres": ["8到12個氛圍標籤，描述畫面與聽覺的整體質感"],
-  "cast": ["演員1名稱", "演員2名稱", "演員3名稱"]
+  "scenes_main": ["3到6個主要場景，只填具體地點名稱，如：城市街道、住宅、商場、森林、命案現場、監獄、太空、荒地、密閉空間"],
+  "scenes_sub": ["3到6個次要場景，只填具體地點名稱，如：室內、教室、醫院、車廂、辦公室、酒吧、走廊、地下室、心理諮商所"],
+  "genres": ["6到10個類型與題材關鍵詞，如：喜劇、恐怖、驚悚、科幻、犯罪、懸疑、青春、荒唐、超自然、女性職場"],
+  "emotions": ["4到8個情緒標籤，描述觀眾觀影時的情緒反應，如：緊張、感動、爆笑、憤怒、憂鬱、熱血、恐懼、溫馨、荒謬"],
+  "atmospheres": ["4到8個氛圍標籤，描述畫面與聽覺的整體質感，如：黑暗、夢幻、復古、壓抑、華麗、詭譎、寫實、浪漫、霓虹"],
+  "cast": ["演員1名稱", "演員2名稱", "演員3名稱"]  // 列表中可以包含多位演員
 }
-
-【場景詞庫｜scenes_main / scenes_sub 可參考，只能填具體地點】
-城市街道、鬧市、巷弄、天橋、屋頂、頂樓、陽台、公寓、老屋、豪宅、透天厝、社區、夜市、菜市場、商場、百貨、便利商店、餐廳、路邊攤、咖啡廳、酒吧、夜店、居酒屋、卡拉OK、旅館、汽車旅館、民宿、溫泉旅館、醫院、急診室、病房、診所、學校、教室、宿舍、操場、補習班、辦公室、會議室、開放式辦公、工廠、工地、產線、倉庫、警局、派出所、偵訊室、看守所、監獄、法庭、律師事務所、教堂、廟宇、墓地、殯儀館、車站、機場、碼頭、港口、地鐵、車廂、計程車、公車、高速公路、停車場、地下道、隧道、地下室、密室、走廊、樓梯間、電梯、浴室、廚房、臥室、書房、圖書館、書店、美術館、畫廊、電影院、片場、攝影棚、演唱會場、體育場、球場、健身房、游泳池、海邊、海灘、漁村、島嶼、船上、遊輪、河邊、湖邊、濕地、沼澤、森林、山林、密林、草原、牧場、沙漠、戈壁、雪山、高山、洞穴、礦坑、火山、廢墟、空屋、鬼屋、遊樂園、動物園、實驗室、資料中心、機房、太空站、太空船、戰場、戰壕、軍營、難民營、邊境檢查站、貧民窟、宴會廳、婚禮會場、命案現場、犯罪現場、安全屋、藏身處、天台、天橋下、橋下、涵洞
-
-【類型／題材詞庫｜genres 可參考】
-喜劇、黑色幽默、諷刺喜劇、浪漫喜劇、恐怖、心理恐怖、民俗恐怖、邪典、驚悚、懸疑、推理、謀殺謎案、犯罪、警匪、黑幫、黑幫崛起、偵探、連環殺手、科幻、近未來、太空歌劇、賽博龐克、時間旅行、平行宇宙、奇幻、黑暗奇幻、神話改編、超自然、靈異、鬼怪、殭屍、吸血鬼、狼人、動作、槍戰、武打、功夫、武俠、仙俠、古裝、宮廷、宮鬥、權謀、戰爭、反戰、軍事、間諜、諜戰、災難、末日、求生、荒島求生、怪獸、巨獸、超級英雄、漫改、動畫、定格動畫、紀錄片、偽紀錄片、傳記、真實事件改編、社會寫實、家庭倫理、親情、親子、青春、校園、成長、初戀、愛情、虐戀、三角戀、同志、酷兒、女性視角、女力、職場、職場鬥爭、政治、選舉、革命、移民、離散、底層、邊緣人、成癮、心理創傷、家暴、霸凌、環保、氣候、科技倫理、AI、機器人、仿生人、音樂、歌舞、運動、競技、美食、公路片、西部、民俗、鄉野傳奇、藝術電影、獨立製片、黑色電影、B級片、情色、慾望、救贖、復仇、逃亡、師生、師徒、醫療、法庭、記者、調查報導
-
-【情緒詞庫｜emotions 只填觀眾情緒反應，不要填場景或氛圍】
-緊張、緊繃、刺激、恐懼、害怕、毛骨悚然、不安、焦慮、壓抑、窒息感、憤怒、義憤、憎恨、厭惡、悲傷、哀愁、憂鬱、心碎、催淚、感動、溫馨、暖心、療癒、釋懷、平靜、沉靜、孤獨、寂寞、疏離、迷惘、困惑、懷疑、猜忌、絕望、崩潰、無力、希望、振奮、樂觀、興奮、熱血、激昂、暢快、痛快、爆笑、好笑、荒謬、尷尬、羞恥、甜蜜、心動、怦然心動、浪漫、依戀、嫉妒、修羅、壓力、喘不過氣、懷舊、感傷、懷念、驚喜、震撼、敬畏、莊嚴、滑稽、戲謔、苦澀、無奈、憐憫、同情、厭世、虛無、狂喜、痛快淋漓
-
-【氛圍詞庫｜atmospheres 只填視聽質感／空氣感，不要填情緒動詞】
-黑暗、陰暗、陰森、壓抑、詭譎、神秘、冷冽、潮濕、霉味、雨夜、霧氣、煙霧、塵土、烈日、炎熱、乾涸、雪國、冰雪、霓虹、賽博、夜生活、復古、懷舊、年代感、民國風、日治感、80年代、90年代、千禧、Y2K、寫實、生活化、紀實感、手持感、底片感、粗粒、高對比、低飽和、暖色調、冷色調、金色時光、藍調、華麗、奢華、浮誇、繽紛、視覺系、夢幻、迷幻、超現實、詩意、清新、淡雅、日系、韓系、港式、台式、鄉土、粗獷、硬派、陽剛、柔和、細膩、溫暖、浪漫、頹廢、廢土、末世、荒蕪、廢墟、壯闊、肅殺、硝煙、江湖感、古風、東方美學、金屬感、未來感、工業感、極簡、空靈、神聖、莊嚴、幽閉、密閉、迷宮感、無限空間、單調、重複、節奏感、舞台感、演唱會感、童趣、童話感、哥德、蒸汽龐克、noir、陰影、燭光、螢光、月光、霓虹色、血腥、獵奇、暴力美學、黑色幽默調、諷刺感
-
 重要規則：
 1. scenes_main 和 scenes_sub 只能填「觀眾看得懂的具體地點或空間」，不要填抽象世界觀
-2. 禁止場景出現：未知世界、冒險市、奇幻世界、魔法世界、異世界、夢境世界、命運舞台、故事世界、內心世界、記憶空間（除非畫面明確是可辨識實體空間）
+2. 禁止場景出現：未知世界、冒險市、奇幻世界、魔法世界、異世界、夢境世界、命運舞台、故事世界
 3. genres 不只填片種，也要補題材與可搜尋關鍵詞，但不要亂編不存在的政治或社會議題
 4. emotions 只填情緒反應詞；atmospheres 只填氛圍與視聽質感詞，兩者不可混用
-5. 每個陣列都要去重，不要重複意思太接近的詞；優先具體、可搜尋
-6. 就算不確定也要根據影片畫面與片名合理推測，但要避免太空泛的詞（如「電影」「好看」「劇情」）
-7. 所有輸出都必須使用台灣繁體中文，不可以出現簡體中文
-8. 不要整份照抄詞庫；只選與預告真正相符的詞，數量盡量接近上方區間上限，寧可多幾個貼切詞也不要只給少數空泛詞"""
+5. 每個陣列都要去重，不要重複意思太接近的詞
+6. 就算不確定也要根據影片畫面與片名合理推測，但要避免太空泛的詞
+7. 所有輸出都必須使用台灣繁體中文，不可以出現簡體中文"""
 
 
 _token_cache = {"token": None, "expires": 0}
@@ -219,9 +145,21 @@ _user_prefs_sheet_id_cache = None
 _push_feed_cache = {}
 _push_feed_lock = threading.Lock()
 _rooms_cache = {}
-_rooms_lock = threading.Lock()
-_password_reset_lock = threading.Lock()
-_password_reset_attempts = {}
+_rooms_lock = threading.RLock()  # short critical sections for cache only
+_room_locks = {}  # per-room Lock: different rooms join/leave in parallel
+_room_locks_guard = threading.Lock()
+
+
+def _get_room_lock(code):
+    """Serialize RMW for one room code; other rooms are not blocked."""
+    code = normalize_room_code(code)
+    with _room_locks_guard:
+        lock = _room_locks.get(code)
+        if lock is None:
+            lock = threading.Lock()
+            _room_locks[code] = lock
+        return lock
+
 
 
 def get_access_token():
@@ -313,16 +251,7 @@ def ensure_sheet():
     try:
         info = sheets_request("GET", "")
         names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        for name in [
-            SHEET_NAME,
-            CONFIG_SHEET,
-            USER_PREFS_SHEET,
-            PUSH_FEED_SHEET,
-            USER_EVENTS_SHEET,
-            ROOMS_SHEET,
-            USER_AUTH_SHEET,
-            PASSWORD_RESET_LOG_SHEET,
-        ]:
+        for name in [SHEET_NAME, CONFIG_SHEET, USER_PREFS_SHEET, PUSH_FEED_SHEET, USER_EVENTS_SHEET, ROOMS_SHEET]:
             if name not in names:
                 sheets_request("POST", ":batchUpdate", {
                     "requests": [{"addSheet": {"properties": {"title": name}}}]
@@ -355,39 +284,6 @@ def read_config_rows():
         return []
 
 
-def get_config_text(key: str, default: str = "") -> str:
-    want = str(key or "").strip()
-    if not want:
-        return default
-    for row in read_config_rows():
-        if len(row) >= 2 and str(row[0]).strip() == want and str(row[1]).strip():
-            return str(row[1]).strip()
-    return default
-
-
-def set_config_text(key: str, value: str) -> bool:
-    """Upsert a plain A:B text row in the config sheet without wiping other keys."""
-    want = str(key or "").strip()
-    if not want:
-        return False
-    try:
-        ensure_config_sheet()
-        rows = read_config_rows()
-        other = [r for r in rows if not (r and str(r[0]).strip() == want)]
-        text = str(value or "").strip()
-        if text:
-            other.append([want, text])
-        clear_range = urllib.parse.quote(f"{CONFIG_SHEET}!A:Z")
-        sheets_request("POST", f"/values/{clear_range}:clear", {})
-        if other:
-            start = urllib.parse.quote(f"{CONFIG_SHEET}!A1")
-            sheets_request("PUT", f"/values/{start}?valueInputOption=RAW", {"values": other})
-        return True
-    except Exception as e:
-        print(f"  set_config_text({key}) 錯誤: {e}")
-        return False
-
-
 def get_config_json(key: str, default):
     for row in read_config_rows():
         if len(row) >= 2 and row[0] == key and row[1].strip():
@@ -396,35 +292,6 @@ def get_config_json(key: str, default):
             except Exception:
                 return default
     return default
-
-
-def get_email_settings():
-    """
-    Email settings: Google Sheets config tab overrides env.
-    Keys in sheet (column A / B):
-      mail_webhook_url, mail_webhook_secret  ← Apps Script（可寄任意收件人）
-      resend_api_key, resend_from_email
-      app_login_url
-      gmail_smtp_user, gmail_smtp_password, gmail_from_name  (local only; Render blocks SMTP)
-    """
-    resend_key = get_config_text("resend_api_key") or RESEND_API_KEY
-    resend_from = get_config_text("resend_from_email") or RESEND_FROM_EMAIL
-    gmail_user = get_config_text("gmail_smtp_user") or GMAIL_SMTP_USER
-    gmail_pass = "".join(get_config_text("gmail_smtp_password").split()) or GMAIL_SMTP_PASSWORD
-    gmail_name = get_config_text("gmail_from_name") or GMAIL_FROM_NAME or "FilmDB"
-    login_url = get_config_text("app_login_url") or APP_LOGIN_URL
-    webhook_url = get_config_text("mail_webhook_url")
-    webhook_secret = get_config_text("mail_webhook_secret")
-    return {
-        "mail_webhook_url": webhook_url.strip(),
-        "mail_webhook_secret": webhook_secret.strip(),
-        "resend_api_key": resend_key.strip(),
-        "resend_from_email": resend_from.strip(),
-        "gmail_smtp_user": gmail_user.strip(),
-        "gmail_smtp_password": gmail_pass,
-        "gmail_from_name": (gmail_name or "FilmDB").strip() or "FilmDB",
-        "app_login_url": login_url.strip(),
-    }
 
 
 def set_config_json(key: str, value) -> bool:
@@ -744,417 +611,10 @@ def set_user_temperature(user_name, movie_id, temperature):
     temps[movie_id] = clamp_temperature(temperature)
     u["temperatures"] = temps
     normalized = normalize_prefs(u)
-    normalized["updatedAt"] = utc_now()
     with _user_lock:
         user_behavior[user_name] = normalized
     persist_user_prefs(user_name)
     return normalized
-
-
-def normalize_email(value):
-    return str(value or "").strip().lower()
-
-
-def is_valid_email(value):
-    email = normalize_email(value)
-    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)) and len(email) <= 254
-
-
-def mask_email(value):
-    email = normalize_email(value)
-    if "@" not in email:
-        return ""
-    local, domain = email.split("@", 1)
-    shown = local[:2] if len(local) > 2 else local[:1]
-    return f"{shown}{'*' * max(2, len(local) - len(shown))}@{domain}"
-
-
-def hash_password(password, salt=None):
-    password = str(password or "")
-    if salt is None:
-        salt_bytes = secrets.token_bytes(16)
-    elif isinstance(salt, bytes):
-        salt_bytes = salt
-    else:
-        salt_bytes = base64.b64decode(str(salt))
-    digest = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt_bytes,
-        PASSWORD_PBKDF2_ITERATIONS,
-    )
-    return {
-        "passwordHash": base64.b64encode(digest).decode("ascii"),
-        "passwordSalt": base64.b64encode(salt_bytes).decode("ascii"),
-    }
-
-
-def verify_password(password, auth):
-    try:
-        expected = base64.b64decode(auth.get("passwordHash") or "")
-        salt = base64.b64decode(auth.get("passwordSalt") or "")
-        actual = hashlib.pbkdf2_hmac(
-            "sha256",
-            str(password or "").encode("utf-8"),
-            salt,
-            PASSWORD_PBKDF2_ITERATIONS,
-        )
-        return hmac.compare_digest(actual, expected)
-    except Exception:
-        return False
-
-
-def validate_new_password(password):
-    password = str(password or "")
-    if len(password) < 10:
-        return "密碼至少需要 10 個字元"
-    if len(password) > 128:
-        return "密碼不可超過 128 個字元"
-    return ""
-
-
-def generate_temporary_password():
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(16))
-
-
-def user_auth_read_all():
-    ensure_sheet()
-    encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A:G")
-    rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
-    out = []
-    for index, row in enumerate(rows, start=1):
-        if not row:
-            continue
-        user_name = str(row[0]).strip()
-        if not user_name or user_name.lower() == "username":
-            continue
-        padded = list(row) + [""] * (7 - len(row))
-        out.append({
-            "row": index,
-            "userName": user_name,
-            "email": normalize_email(padded[1]),
-            "emailDisplay": str(padded[2] or padded[1]).strip(),
-            "passwordHash": str(padded[3]).strip(),
-            "passwordSalt": str(padded[4]).strip(),
-            "forcePasswordChange": str(padded[5]).lower() in ("1", "true", "yes"),
-            "updatedAt": str(padded[6]).strip(),
-        })
-    return out
-
-
-def user_auth_find(identifier):
-    needle = str(identifier or "").strip()
-    email = normalize_email(needle)
-    for auth in user_auth_read_all():
-        if auth["userName"] == needle or (email and auth["email"] == email):
-            return auth
-    return None
-
-
-def user_auth_save(auth):
-    user_name = str(auth.get("userName") or "").strip()
-    email = normalize_email(auth.get("email"))
-    if not user_name or not is_valid_email(email):
-        raise ValueError("缺少有效的 userName 或 email")
-    email_owner = user_auth_find(email)
-    if email_owner and email_owner["userName"] != user_name:
-        raise ValueError("此 Email 已登記給其他使用者")
-    existing = user_auth_find(user_name)
-    row = [
-        user_name,
-        email,
-        str(auth.get("emailDisplay") or email).strip(),
-        str(auth.get("passwordHash") or ""),
-        str(auth.get("passwordSalt") or ""),
-        "true" if auth.get("forcePasswordChange") else "false",
-        str(auth.get("updatedAt") or utc_now()),
-    ]
-    if existing:
-        encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A{existing['row']}:G{existing['row']}")
-        sheets_request(
-            "PUT",
-            f"/values/{encoded}?valueInputOption=RAW",
-            {"values": [row]},
-        )
-    else:
-        # Sheets append may infer a partial table when hash/salt cells are empty
-        # and shift A:G values into the wrong columns. Write to an explicit row.
-        all_range = urllib.parse.quote(f"{USER_AUTH_SHEET}!A:G")
-        raw_rows = sheets_request("GET", f"/values/{all_range}").get("values", [])
-        next_row = len(raw_rows) + 1
-        encoded = urllib.parse.quote(f"{USER_AUTH_SHEET}!A{next_row}:G{next_row}")
-        sheets_request(
-            "PUT",
-            f"/values/{encoded}?valueInputOption=RAW",
-            {"values": [row]},
-        )
-
-
-def password_reset_log_append(user_name, email, status, detail="", requested_by="user"):
-    ensure_sheet()
-    entry = {
-        "at": utc_now(),
-        "userName": str(user_name or ""),
-        "email": mask_email(email),
-        "status": str(status or ""),
-        "detail": str(detail or "")[:300],
-        "requestedBy": str(requested_by or "user")[:80],
-    }
-    encoded = urllib.parse.quote(f"{PASSWORD_RESET_LOG_SHEET}!A:A")
-    sheets_request(
-        "POST",
-        f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
-        {"values": [[json.dumps(entry, ensure_ascii=False)]]},
-    )
-
-
-def password_reset_log_read(limit=100):
-    ensure_sheet()
-    encoded = urllib.parse.quote(f"{PASSWORD_RESET_LOG_SHEET}!A:A")
-    rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
-    out = []
-    for row in reversed(rows[-max(1, min(int(limit), 500)):]):
-        if not row:
-            continue
-        try:
-            out.append(json.loads(row[0]))
-        except Exception:
-            continue
-    return out
-
-
-def post_apps_script_json(url, payload, timeout=30):
-    """
-    POST JSON to a Google Apps Script web app.
-    Apps Script runs doPost on the first request, then 302s to an echo URL.
-    That echo URL only accepts GET — re-POSTing it returns 405.
-    """
-    body = json.dumps(payload).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "FilmDB/1.0",
-    }
-
-    class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-
-    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    opener = urllib.request.build_opener(_NoRedirect())
-    try:
-        with opener.open(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        if e.code not in (301, 302, 303, 307, 308):
-            raise
-        loc = e.headers.get("Location")
-        if not loc:
-            raise
-        get_req = urllib.request.Request(
-            loc,
-            headers={"User-Agent": "FilmDB/1.0"},
-            method="GET",
-        )
-        with urllib.request.urlopen(get_req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    try:
-        return json.loads(raw) if raw.strip() else {}
-    except Exception:
-        return {"ok": True, "raw": raw[:200]}
-
-
-def send_temporary_password_email(email, user_name, temporary_password):
-    settings = get_email_settings()
-    login_url = settings["app_login_url"]
-    login_line = f"\n登入網址：{login_url}" if login_url else ""
-    text = (
-        f"{APP_NAME} 密碼重設\n\n"
-        f"使用者：{user_name}\n"
-        f"臨時密碼：{temporary_password}\n\n"
-        "請登入後立即更改密碼。若不是你提出申請，請聯絡管理員。"
-        f"{login_line}"
-    )
-    safe_user = html.escape(str(user_name))
-    safe_password = html.escape(temporary_password)
-    login_html = (
-        f'<p><a href="{html.escape(login_url, quote=True)}">前往登入</a></p>'
-        if login_url else ""
-    )
-    html_body = (
-        f"<h2>{html.escape(APP_NAME)} 密碼重設</h2>"
-        f"<p>使用者：<strong>{safe_user}</strong></p>"
-        f"<p>臨時密碼：<code>{safe_password}</code></p>"
-        "<p>請登入後立即更改密碼。若不是你提出申請，請聯絡管理員。</p>"
-        f"{login_html}"
-    )
-
-    resend_key = settings["resend_api_key"]
-    resend_from = settings["resend_from_email"]
-    webhook_url = settings["mail_webhook_url"]
-    webhook_secret = settings["mail_webhook_secret"]
-
-    # Apps Script webhook: sends via Gmail to ANY recipient (no domain verify).
-    if webhook_url and webhook_secret:
-        try:
-            data = post_apps_script_json(
-                webhook_url,
-                {
-                    "secret": webhook_secret,
-                    "to": normalize_email(email),
-                    "subject": f"{APP_NAME} 臨時密碼",
-                    "text": text,
-                    "html": html_body,
-                    "fromName": APP_NAME,
-                },
-            )
-            if data.get("ok") is False:
-                raise RuntimeError(data.get("error") or "Apps Script 寄送失敗")
-            return data.get("id") or "appscript:ok"
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Apps Script 寄送失敗 HTTP {e.code}: {detail[:200]}")
-        except RuntimeError:
-            raise
-        except Exception as e:
-            raise RuntimeError(f"Apps Script 連線失敗: {str(e)[:180]}")
-
-    # Prefer Resend HTTP — Render blocks outbound SMTP.
-    if resend_key and resend_from:
-        payload = {
-            "from": resend_from,
-            "to": [normalize_email(email)],
-            "subject": f"{APP_NAME} 臨時密碼",
-            "text": text,
-            "html": html_body,
-        }
-        req = urllib.request.Request(
-            "https://api.resend.com/emails",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {resend_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "FilmDB/1.0",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("id") or ""
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Resend 寄送失敗 HTTP {e.code}: {detail[:200]}")
-
-    gmail_user = settings["gmail_smtp_user"]
-    gmail_password = settings["gmail_smtp_password"]
-    gmail_from_name = settings["gmail_from_name"]
-    on_render = bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID"))
-    if gmail_user and gmail_password and on_render:
-        raise RuntimeError(
-            "Render 無法使用 Gmail SMTP。請在試算表 config 設定 "
-            "mail_webhook_url / mail_webhook_secret（Apps Script，可寄任意人）。"
-        )
-    if gmail_user and gmail_password:
-        message = EmailMessage()
-        message["From"] = formataddr((gmail_from_name, gmail_user))
-        message["To"] = normalize_email(email)
-        message["Subject"] = f"{APP_NAME} 臨時密碼"
-        message["Message-ID"] = make_msgid()
-        message.set_content(text)
-        message.add_alternative(html_body, subtype="html")
-        last_error = ""
-        # Prefer STARTTLS/587 then SSL/465. Force IPv4 (Render often fails on IPv6)
-        # while keeping smtp.gmail.com as TLS server_hostname for cert checks.
-        for use_starttls, port in ((True, 587), (False, 465)):
-            smtp = None
-            raw_sock = None
-            try:
-                infos = socket.getaddrinfo(
-                    "smtp.gmail.com",
-                    port,
-                    socket.AF_INET,
-                    socket.SOCK_STREAM,
-                )
-                if not infos:
-                    raise RuntimeError(f"找不到 smtp.gmail.com:{port} 的 IPv4 位址")
-                host_ip = infos[0][4][0]
-                raw_sock = socket.create_connection((host_ip, port), timeout=20)
-                if use_starttls:
-                    smtp = smtplib.SMTP()
-                    smtp.sock = raw_sock
-                    smtp._host = "smtp.gmail.com"
-                    raw_sock = None  # ownership transferred
-                    code, resp = smtp.getreply()
-                    if code != 220:
-                        raise RuntimeError(f"SMTP greeting {code}: {resp}")
-                    smtp.ehlo()
-                    smtp.starttls(context=_SSL_CONTEXT)
-                    smtp.ehlo()
-                else:
-                    tls_sock = _SSL_CONTEXT.wrap_socket(
-                        raw_sock,
-                        server_hostname="smtp.gmail.com",
-                    )
-                    raw_sock = None
-                    smtp = smtplib.SMTP_SSL()
-                    smtp.sock = tls_sock
-                    smtp._host = "smtp.gmail.com"
-                    code, resp = smtp.getreply()
-                    if code != 220:
-                        raise RuntimeError(f"SMTP greeting {code}: {resp}")
-                    smtp.ehlo()
-                smtp.login(gmail_user, gmail_password)
-                smtp.send_message(message)
-                return f"gmail:{message['Message-ID']}"
-            except smtplib.SMTPException as e:
-                last_error = f"Gmail SMTP 寄送失敗 ({port}): {str(e)[:180]}"
-            except Exception as e:
-                last_error = f"Gmail SMTP 連線失敗 ({port}): {str(e)[:180]}"
-            finally:
-                if smtp is not None:
-                    try:
-                        smtp.quit()
-                    except Exception:
-                        try:
-                            smtp.close()
-                        except Exception:
-                            pass
-                if raw_sock is not None:
-                    try:
-                        raw_sock.close()
-                    except Exception:
-                        pass
-        raise RuntimeError(last_error or "Gmail SMTP 寄送失敗")
-
-    raise RuntimeError(
-        "寄信服務尚未設定：請在 Google 試算表「config」新增 "
-        "mail_webhook_url 與 mail_webhook_secret（見 apps_script_mail.gs）。"
-        "此方式可用你的 Gmail 寄給任意收件人，無需驗證網域、無需改 Render。"
-    )
-
-
-def admin_key_valid(value):
-    return bool(ADMIN_API_KEY) and hmac.compare_digest(
-        str(value or "").encode("utf-8"),
-        ADMIN_API_KEY.encode("utf-8"),
-    )
-
-
-def password_reset_rate_limited(email):
-    key = hashlib.sha256(normalize_email(email).encode("utf-8")).hexdigest()
-    now = time.time()
-    with _password_reset_lock:
-        last = _password_reset_attempts.get(key, 0)
-        if now - last < PASSWORD_RESET_COOLDOWN_SECONDS:
-            return True
-        _password_reset_attempts[key] = now
-        if len(_password_reset_attempts) > 2000:
-            cutoff = now - 3600
-            for old_key, timestamp in list(_password_reset_attempts.items()):
-                if timestamp < cutoff:
-                    _password_reset_attempts.pop(old_key, None)
-    return False
 
 
 def movie_to_sheets_card(m, score=None, match_reasons=None):
@@ -1313,15 +773,52 @@ def rooms_find_row(code):
     return None
 
 
-def rooms_save_one(room_doc):
+def _rooms_read_cell(row_num):
+    """Read one room JSON cell; returns normalized doc or None."""
+    try:
+        encoded = urllib.parse.quote(f"{ROOMS_SHEET}!B{row_num}")
+        vals = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        if not vals or not vals[0]:
+            return None
+        raw = vals[0][0]
+        if isinstance(raw, str):
+            doc = normalize_room(json.loads(raw))
+        elif isinstance(raw, dict):
+            doc = normalize_room(raw)
+        else:
+            return None
+        return doc
+    except Exception as e:
+        print(f"  _rooms_read_cell 錯誤: {e}")
+        return None
+
+
+def rooms_save_one(room_doc, *, merge_members=False):
+    """
+    Persist one room row. Sheets I/O runs outside the global cache lock so
+    different rooms can be written concurrently. merge_members unions names
+    with cache + the live sheet cell before PUT.
+    """
     ensure_sheet()
     doc = normalize_room(room_doc)
     code = doc["code"]
     if not code:
         raise ValueError("缺少房間代碼")
-    payload = json.dumps(doc, ensure_ascii=False)
+
+    if merge_members:
+        with _rooms_lock:
+            cached = _rooms_cache.get(code)
+            if cached:
+                doc = room_merge_snapshots(cached, doc)
+
     row_num = rooms_find_row(code)
     if row_num:
+        if merge_members:
+            sheet_doc = _rooms_read_cell(row_num)
+            if sheet_doc:
+                sheet_doc["code"] = code
+                doc = room_merge_snapshots(sheet_doc, doc)
+        payload = json.dumps(doc, ensure_ascii=False)
         encoded = urllib.parse.quote(f"{ROOMS_SHEET}!B{row_num}")
         sheets_request(
             "PUT",
@@ -1331,24 +828,48 @@ def rooms_save_one(room_doc):
     else:
         existing = rooms_read_all()
         if code in existing:
-            raise ValueError(f"房間代碼 {code} 已存在")
-        encoded = urllib.parse.quote(f"{ROOMS_SHEET}!A:B")
-        sheets_request(
-            "POST",
-            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
-            {"values": [[code, payload]]},
-        )
+            row_num = rooms_find_row(code)
+            if not row_num:
+                raise ValueError(f"房間代碼 {code} 已存在")
+            if merge_members:
+                doc = room_merge_snapshots(existing.get(code), doc)
+            payload = json.dumps(doc, ensure_ascii=False)
+            encoded = urllib.parse.quote(f"{ROOMS_SHEET}!B{row_num}")
+            sheets_request(
+                "PUT",
+                f"/values/{encoded}?valueInputOption=RAW",
+                {"values": [[payload]]},
+            )
+        else:
+            payload = json.dumps(doc, ensure_ascii=False)
+            encoded = urllib.parse.quote(f"{ROOMS_SHEET}!A:B")
+            sheets_request(
+                "POST",
+                f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+                {"values": [[code, payload]]},
+            )
+
     with _rooms_lock:
+        prev = _rooms_cache.get(code)
+        if merge_members and prev:
+            doc = room_merge_snapshots(prev, doc)
         _rooms_cache[code] = doc
-    return doc
+        return dict(doc)
 
 
 def load_rooms_from_sheets():
     global _rooms_cache
     loaded = rooms_read_all()
     with _rooms_lock:
-        _rooms_cache = loaded
-    print(f"  已載入 {len(loaded)} 個多人房間（{ROOMS_SHEET}）")
+        merged = {}
+        for code, sheet_doc in loaded.items():
+            cached = _rooms_cache.get(code)
+            merged[code] = room_merge_snapshots(sheet_doc, cached) if cached else sheet_doc
+        for code, cached in _rooms_cache.items():
+            if code not in merged:
+                merged[code] = cached
+        _rooms_cache = merged
+    print(f"  已載入 {len(merged)} 個多人房間（{ROOMS_SHEET}）")
 
 
 def room_get(code):
@@ -1357,56 +878,122 @@ def room_get(code):
         return None
     with _rooms_lock:
         cached = _rooms_cache.get(code)
-    if cached:
-        return cached
+        if cached:
+            return dict(cached)
     all_rooms = rooms_read_all()
     doc = all_rooms.get(code)
     if doc:
         with _rooms_lock:
+            cached = _rooms_cache.get(code)
+            doc = room_merge_snapshots(doc, cached) if cached else doc
             _rooms_cache[code] = doc
-    return doc
+            return dict(doc)
+    return None
+
+
+def _room_resolve(code):
+    """Merge cache + sheet for one room. Does not hold global lock during Sheets I/O."""
+    code = normalize_room_code(code)
+    with _rooms_lock:
+        cached = dict(_rooms_cache[code]) if code in _rooms_cache else None
+    sheet_doc = None
+    try:
+        row_num = rooms_find_row(code)
+        if row_num:
+            sheet_doc = _rooms_read_cell(row_num)
+            if sheet_doc:
+                sheet_doc["code"] = code
+        if sheet_doc is None:
+            sheet_doc = rooms_read_all().get(code)
+    except Exception as e:
+        print(f"  _room_resolve sheets 錯誤: {e}")
+    if not sheet_doc and not cached:
+        return None
+    doc = room_merge_snapshots(sheet_doc, cached)
+    with _rooms_lock:
+        prev = _rooms_cache.get(code)
+        if prev:
+            doc = room_merge_snapshots(doc, prev)
+        _rooms_cache[code] = doc
+        return dict(doc)
 
 
 def room_create(room_name="", message="", created_by=""):
     existing = rooms_read_all()
-    doc = build_new_room(set(existing.keys()), room_name=room_name, message=message, created_by=created_by)
-    return rooms_save_one(doc)
+    with _rooms_lock:
+        existing_codes = set(existing.keys()) | set(_rooms_cache.keys())
+    doc = build_new_room(
+        existing_codes,
+        room_name=room_name,
+        message=message,
+        created_by=created_by,
+    )
+    with _get_room_lock(doc["code"]):
+        return rooms_save_one(doc, merge_members=False)
 
 
 def room_join(code, user_name):
+    """
+    Append user to this room's members under a per-room lock.
+    Different rooms proceed in parallel; same-room joins serialize + merge.
+    """
     code = normalize_room_code(code)
     user_name = (user_name or "").strip()
     if not code:
         return None, "缺少 roomCode"
     if not user_name:
         return None, "缺少 userName"
-    doc = room_get(code)
-    if not doc:
-        return None, "房間不存在"
-    if doc.get("status") == "closed":
-        return None, "房間已關閉"
-    updated = room_add_member(doc, user_name)
-    saved = rooms_save_one(updated)
-    return saved, None
+    with _get_room_lock(code):
+        doc = _room_resolve(code)
+        if not doc:
+            return None, "房間不存在"
+        if doc.get("status") == "closed":
+            return None, "房間已關閉"
+        try:
+            updated = room_add_member(doc, user_name)
+        except ValueError as e:
+            return None, str(e)
+        saved = rooms_save_one(updated, merge_members=True)
+        return saved, None
+
+
+def room_leave(code, user_name):
+    """Remove one user from members; other members stay."""
+    code = normalize_room_code(code)
+    user_name = (user_name or "").strip()
+    if not code:
+        return None, "缺少 roomCode"
+    if not user_name:
+        return None, "缺少 userName"
+    with _get_room_lock(code):
+        doc = _room_resolve(code)
+        if not doc:
+            return None, "房間不存在"
+        updated = room_remove_member(doc, user_name)
+        # Intentional remove: do not merge-members (would resurrect the leaver)
+        saved = rooms_save_one(updated, merge_members=False)
+        return saved, None
 
 
 def room_close(code):
     code = normalize_room_code(code)
-    doc = room_get(code)
-    if not doc:
-        return None, "房間不存在"
-    doc["status"] = "closed"
-    return rooms_save_one(doc), None
+    with _get_room_lock(code):
+        doc = _room_resolve(code)
+        if not doc:
+            return None, "房間不存在"
+        doc["status"] = "closed"
+        return rooms_save_one(doc, merge_members=True), None
 
 
 def room_publish_all_members(code, limit=20, message=""):
     code = normalize_room_code(code)
-    doc = room_get(code)
+    with _get_room_lock(code):
+        doc = _room_resolve(code)
     if not doc:
         return None, "房間不存在"
     if doc.get("status") == "closed":
         return None, "房間已關閉"
-    members = doc.get("members") or []
+    members = list(doc.get("members") or [])
     if not members:
         return None, "房間尚無成員"
     msg = (message or doc.get("message") or "").strip()
@@ -1431,10 +1018,13 @@ def room_publish_all_members(code, limit=20, message=""):
             })
         except Exception as e:
             results.append({"userName": name, "ok": False, "error": str(e)})
-    doc["lastPushAt"] = utc_now()
-    if msg:
-        doc["message"] = msg
-    rooms_save_one(doc)
+    with _get_room_lock(code):
+        fresh = _room_resolve(code) or doc
+        fresh["lastPushAt"] = utc_now()
+        if msg:
+            fresh["message"] = msg
+        rooms_save_one(fresh, merge_members=True)
+        last_push = fresh["lastPushAt"]
     ok_n = sum(1 for r in results if r.get("ok"))
     return {
         "ok": True,
@@ -1442,9 +1032,8 @@ def room_publish_all_members(code, limit=20, message=""):
         "published": ok_n,
         "total": len(results),
         "results": results,
-        "lastPushAt": doc["lastPushAt"],
+        "lastPushAt": last_push,
     }, None
-
 
 def admin_build_push_payload(user_name, limit=20, message=""):
     movies = db_read()
@@ -1564,8 +1153,8 @@ def admin_republish_stale_users(limit=20, message=""):
         if not push_is_stale(prefs, feed):
             results.append({"userName": name, "ok": False, "skipped": True, "reason": "推送仍為最新"})
             continue
-        if not prefs_ready_for_push(prefs):
-            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無偏熱評分"})
+        if not prefs.get("like"):
+            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無喜歡"})
             continue
         try:
             doc = admin_publish_push(name, limit=limit, message=message)
@@ -1622,14 +1211,17 @@ def handle_sync_push(body):
     room_code = normalize_room_code(body.get("roomCode") or body.get("room") or "")
     room_doc = None
     if room_code:
-        room_doc, room_err = room_join(room_code, user_name)
+        if body.get("leaveRoom"):
+            room_doc, room_err = room_leave(room_code, user_name)
+        else:
+            room_doc, room_err = room_join(room_code, user_name)
         if room_err:
             return 400, {"ok": False, "error": room_err}
     auto_publish = bool(body.get("autoPublishRecommend"))
     limit = int(body.get("limit") or 20)
     message = (body.get("message") or "").strip()
     published = None
-    if auto_publish and prefs_ready_for_push(merged):
+    if auto_publish and merged.get("like"):
         published = admin_publish_push(user_name, limit=limit, message=message)
     feed = push_feed_get(user_name)
     movies = db_read()
@@ -1651,12 +1243,12 @@ def admin_publish_push_all(limit=20, message=""):
         names = list(user_behavior.keys())
     for name in names:
         prefs = user_behavior.get(name) or {}
-        if not prefs_ready_for_push(prefs):
+        if not (prefs.get("like")):
             results.append({
                 "userName": name,
                 "ok": False,
                 "skipped": True,
-                "error": "尚無偏熱評分（需有溫度 > 50）",
+                "error": "尚無喜歡記錄",
             })
             continue
         try:
@@ -1860,46 +1452,33 @@ def movies_missing_atmospheres(movies=None) -> list[dict]:
 
 
 _GENRE_ATMOSPHERE_MAP = {
-    "恐怖": ["黑暗", "陰森", "壓抑", "詭譎", "幽閉"],
-    "驚悚": ["陰暗", "緊繃", "詭譎", "潮濕", "冷冽"],
-    "懸疑": ["神秘", "陰鬱", "冷冽", "詭譎", "陰影"],
-    "科幻": ["未來感", "霓虹", "冷冽", "金屬感", "工業感"],
-    "奇幻": ["夢幻", "超現實", "迷幻", "華麗", "詩意"],
-    "愛情": ["浪漫", "柔和", "溫暖", "細膩", "金色時光"],
+    "恐怖": ["黑暗", "陰森", "壓抑", "詭譎"],
+    "驚悚": ["陰暗", "緊繃", "詭譎", "潮濕"],
+    "懸疑": ["神秘", "陰鬱", "冷冽", "詭譎"],
+    "科幻": ["未來感", "霓虹", "冷冽", "金屬感"],
+    "奇幻": ["夢幻", "超現實", "迷幻", "華麗"],
+    "愛情": ["浪漫", "柔和", "溫暖", "細膩"],
     "浪漫": ["浪漫", "柔和", "溫暖", "細膩"],
-    "喜劇": ["明亮", "輕快", "活潑", "繽紛", "節奏感"],
-    "動作": ["硬派", "緊湊", "熱血", "粗獷", "高對比"],
-    "戰爭": ["肅殺", "硝煙", "沉重", "壯闊", "塵土"],
-    "古裝": ["古風", "厚重", "東方美學", "寫實", "燭光"],
-    "武俠": ["江湖感", "古風", "飄逸", "寫實", "壯闊"],
-    "犯罪": ["陰暗", "寫實", "冷冽", "頹廢", "noir"],
-    "紀錄": ["寫實", "生活化", "自然光", "紀實感", "手持感"],
-    "動畫": ["繽紛", "夢幻", "童趣", "明亮", "童話感"],
-    "音樂": ["華麗", "節奏感", "舞台感", "熱烈", "演唱會感"],
-    "家庭": ["溫馨", "日常", "柔和", "治癒", "溫暖"],
-    "青春": ["清新", "明亮", "校園感", "青澀", "淡雅"],
-    "災難": ["末世", "荒蕪", "廢土", "煙霧", "壯闊"],
-    "末日": ["廢土", "荒蕪", "灰暗", "壓抑", "後啟示錄"],
-    "殭屍": ["血腥", "廢墟", "陰森", "求生感", "灰暗"],
-    "太空": ["空靈", "冷冽", "未來感", "極簡", "壯闊"],
-    "西部": ["塵土", "烈日", "粗獷", "荒涼", "復古"],
-    "黑色": ["noir", "陰影", "陰暗", "煙霧", "冷冽"],
-    "港式": ["港式", "霓虹", "夜生活", "寫實", "節奏感"],
-    "台式": ["台式", "鄉土", "生活化", "寫實", "日常"],
-    "民俗": ["鄉土", "潮濕", "神秘", "陰森", "儀式感"],
-    "賽博": ["賽博", "霓虹", "金屬感", "夜生活", "未來感"],
+    "喜劇": ["明亮", "輕快", "活潑", "繽紛"],
+    "動作": ["硬派", "緊湊", "熱血", "粗獷"],
+    "戰爭": ["肅殺", "硝煙", "沉重", "壯闊"],
+    "古裝": ["古風", "厚重", "東方美學", "寫實"],
+    "武俠": ["江湖", "古風", "飄逸", "寫實"],
+    "犯罪": ["陰暗", "寫實", "冷冽", "頹廢"],
+    "紀錄": ["寫實", "生活化", "自然光", "紀實感"],
+    "動畫": ["繽紛", "夢幻", "童趣", "明亮"],
+    "音樂": ["華麗", "節奏感", "舞台感", "熱烈"],
+    "家庭": ["溫馨", "日常", "柔和", "治癒"],
+    "青春": ["清新", "明亮", "校園感", "青澀"],
 }
 
 _SCENE_ATMOSPHERE_HINTS = [
     "雨夜", "霓虹", "復古", "潮濕", "炎熱", "雪國", "海邊", "都市", "鄉村",
     "密室", "廢墟", "太空", "森林", "監獄", "醫院", "學校", "酒吧", "教堂",
-    "夜市", "巷弄", "屋頂", "天台", "地下室", "隧道", "沙漠", "雪山", "戰場",
-    "廢土", "鬼屋", "廟宇", "墓地", "工廠", "機房", "車廂", "碼頭", "島嶼",
 ]
 
 _EMOTION_NOT_ATMOSPHERE = {
     "感動", "緊張", "興奮", "害怕", "快樂", "悲傷", "憤怒", "驚喜", "無聊",
-    "恐懼", "焦慮", "絕望", "爆笑", "心動", "仇恨", "厭惡", "孤獨",
 }
 
 
@@ -1945,7 +1524,7 @@ def heuristic_atmospheres_for_movie(movie: dict) -> list[str]:
             add(t)
             if len(found) >= 4:
                 break
-    return found[:12]
+    return found[:8]
 
 
 def call_gemini_atmospheres_for_movie(movie: dict) -> dict:
@@ -2705,274 +2284,15 @@ def call_gemini_analyze(yt_url):
     return call_gemini_analyze_video(yt_url)
 
 
-def get_twelvelabs_api_key():
-    return get_config_text("twelvelabs_api_key") or TWELVELABS_API_KEY
-
-
-def get_analyze_provider_setting():
-    raw = (get_config_text("analyze_provider") or ANALYZE_PROVIDER or "auto").strip().lower()
-    if raw in ("gemini", "twelvelabs", "auto"):
-        return raw
-    return "auto"
-
-
-def normalize_analyze_provider(value):
-    raw = str(value or "").strip().lower()
-    if raw in ("gemini", "twelvelabs", "auto", "tl", "twelve", "twelve_labs"):
-        if raw in ("tl", "twelve", "twelve_labs"):
-            return "twelvelabs"
-        return raw
-    return ""
-
-
-def download_youtube_video_file(yt_url, max_height=720):
-    """Download a YouTube trailer to a temp mp4 for TwelveLabs upload."""
-    try:
-        import yt_dlp
-    except ImportError as e:
-        raise RuntimeError("伺服器未安裝 yt-dlp，無法下載 YouTube 給 TwelveLabs") from e
-
-    yt_id = extract_yt_id(yt_url) or "video"
-    tmpdir = tempfile.mkdtemp(prefix="filmdb_tl_")
-    outtmpl = os.path.join(tmpdir, f"{yt_id}.%(ext)s")
-    ydl_opts = {
-        "format": "best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best",
-        "outtmpl": outtmpl,
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "retries": 2,
-        "socket_timeout": 30,
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(yt_url, download=True)
-            filepath = ydl.prepare_filename(info)
-            if not os.path.isfile(filepath):
-                # merge may change extension
-                base, _ = os.path.splitext(filepath)
-                for ext in (".mp4", ".mkv", ".webm", ".m4a"):
-                    cand = base + ext
-                    if os.path.isfile(cand):
-                        filepath = cand
-                        break
-            if not os.path.isfile(filepath):
-                raise RuntimeError("YouTube 下載完成但找不到檔案")
-            return filepath, tmpdir
-    except Exception:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-        raise
-
-
-def _parse_twelvelabs_analyze_data(raw):
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        return raw
-    text = str(raw).strip()
-    if not text:
-        return None
-    parsed = extract_json(text)
-    if parsed:
-        return parsed
-    try:
-        return json.loads(text)
-    except Exception:
-        return None
-
-
-def call_twelvelabs_analyze(yt_url):
-    """
-    Analyze a YouTube trailer with TwelveLabs Pegasus.
-    TwelveLabs does not accept YouTube page URLs, so we download then upload.
-    """
-    api_key = get_twelvelabs_api_key()
-    if not api_key:
-        return {
-            "ok": False,
-            "error": "未設定 TwelveLabs API Key（可在試算表 config 寫 twelvelabs_api_key）",
-            "code": "TWELVELABS_NO_KEY",
-        }
-
-    yt_id = extract_yt_id(yt_url)
-    if yt_id:
-        yt_url = f"https://www.youtube.com/watch?v={yt_id}"
-    if not yt_id:
-        return {"ok": False, "error": "TwelveLabs 分析需要有效的 YouTube 網址", "code": "TWELVELABS_BAD_URL"}
-
-    try:
-        from twelvelabs import TwelveLabs
-        from twelvelabs.types import (
-            AnalyzePromptV2,
-            SyncResponseFormat,
-            VideoContext_AssetId,
-        )
-    except ImportError as e:
-        return {
-            "ok": False,
-            "error": f"伺服器未安裝 twelvelabs SDK: {e}",
-            "code": "TWELVELABS_NO_SDK",
-        }
-
-    tmpdir = None
-    asset_id = None
-    client = TwelveLabs(api_key=api_key)
-    try:
-        print(f"  TwelveLabs：下載 YouTube {yt_id}…")
-        filepath, tmpdir = download_youtube_video_file(yt_url)
-        size_mb = os.path.getsize(filepath) / (1024 * 1024)
-        print(f"  TwelveLabs：上傳資產 ({size_mb:.1f} MB)…")
-        with open(filepath, "rb") as f:
-            asset = client.assets.create(
-                method="direct",
-                file=f,
-                filename=os.path.basename(filepath),
-            )
-        asset_id = getattr(asset, "id", None)
-        if not asset_id:
-            return {"ok": False, "error": "TwelveLabs 建立資產失敗", "code": "TWELVELABS_ASSET"}
-
-        deadline = time.time() + 300
-        while time.time() < deadline:
-            detail = client.assets.retrieve(asset_id)
-            status = getattr(detail, "status", None) or ""
-            if status == "ready":
-                break
-            if status == "failed":
-                return {
-                    "ok": False,
-                    "error": "TwelveLabs 資產處理失敗",
-                    "code": "TWELVELABS_ASSET_FAILED",
-                }
-            time.sleep(3)
-        else:
-            return {
-                "ok": False,
-                "error": "TwelveLabs 資產處理逾時",
-                "code": "TWELVELABS_ASSET_TIMEOUT",
-            }
-
-        print("  TwelveLabs：開始影片分析…")
-        resp = client.analyze(
-            model_name=TWELVELABS_MODEL,
-            video=VideoContext_AssetId(asset_id=asset_id),
-            prompt_v_2=AnalyzePromptV2(input_text=PROMPT),
-            temperature=0.2,
-            max_tokens=4096,
-            response_format=SyncResponseFormat(
-                type="json_schema",
-                json_schema={
-                    "name": "film_analysis",
-                    "schema": FILM_ANALYSIS_JSON_SCHEMA,
-                    "strict": False,
-                },
-            ),
-        )
-        parsed = _parse_twelvelabs_analyze_data(getattr(resp, "data", None))
-        if not parsed:
-            # fallback: plain prompt without schema
-            resp2 = client.analyze(
-                model_name=TWELVELABS_MODEL,
-                video=VideoContext_AssetId(asset_id=asset_id),
-                prompt=PROMPT,
-                temperature=0.2,
-                max_tokens=4096,
-            )
-            parsed = _parse_twelvelabs_analyze_data(getattr(resp2, "data", None))
-        if not parsed:
-            return {
-                "ok": False,
-                "error": "TwelveLabs 回傳無法解析為 JSON",
-                "code": "TWELVELABS_PARSE",
-            }
-        data = normalize_analysis_result(parsed)
-        meta = fetch_youtube_meta(yt_url)
-        if meta and not data.get("title"):
-            data["title"] = clean_movie_title(meta.get("title", "")) or meta.get("title", "")
-        return {
-            "ok": True,
-            "data": data,
-            "mode": "twelvelabs_video",
-            "provider": "twelvelabs",
-            "model": TWELVELABS_MODEL,
-        }
-    except Exception as e:
-        msg = str(e)[:240]
-        print(f"  TwelveLabs 錯誤: {msg}")
-        return {"ok": False, "error": f"TwelveLabs 分析失敗: {msg}", "code": "TWELVELABS_ERROR"}
-    finally:
-        if tmpdir:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-        if asset_id:
-            try:
-                client.assets.delete(asset_id)
-            except Exception:
-                pass
-
-
-def call_analyze(yt_url, provider=None):
-    """
-    Analyze a YouTube URL with Gemini and/or TwelveLabs.
-    provider: gemini | twelvelabs | auto | None(use sheet/env setting)
-    """
-    chosen = normalize_analyze_provider(provider) or get_analyze_provider_setting()
-    errors = []
-
-    def try_tl():
-        print("  分析提供者：TwelveLabs")
-        return call_twelvelabs_analyze(yt_url)
-
-    def try_gemini():
-        print("  分析提供者：Gemini")
-        out = call_gemini_analyze(yt_url)
-        if out.get("ok"):
-            out.setdefault("provider", "gemini")
-        return out
-
-    if chosen == "twelvelabs":
-        return try_tl()
-    if chosen == "gemini":
-        return try_gemini()
-
-    # auto: prefer TwelveLabs when key exists, else Gemini; fallback the other way
-    has_tl = bool(get_twelvelabs_api_key())
-    has_gemini = bool(get_gemini_keys())
-    order = []
-    if has_tl:
-        order.append(("twelvelabs", try_tl))
-    if has_gemini:
-        order.append(("gemini", try_gemini))
-    if not order:
-        return {
-            "ok": False,
-            "error": "未設定任何分析 API Key（Gemini 或 TwelveLabs）",
-            "code": "NO_ANALYZE_KEY",
-        }
-
-    last = None
-    for name, fn in order:
-        last = fn()
-        if last.get("ok"):
-            return last
-        errors.append(f"{name}: {last.get('error') or '失敗'}")
-        # Don't fallback on hard Gemini region/quota if TL already tried; continue anyway
-    return {
-        "ok": False,
-        "error": " / ".join(errors) if errors else (last or {}).get("error") or "分析失敗",
-        "code": (last or {}).get("code") or "ANALYZE_FAILED",
-        "attempts": errors,
-    }
-
-
-def call_gemini_tmdb(item, provider=None):
+def call_gemini_tmdb(item):
     trailer_url = (item.get("url") or "").strip()
     if trailer_url and ("youtube.com" in trailer_url or "youtu.be" in trailer_url):
-        video_result = call_analyze(trailer_url, provider=provider)
+        video_result = call_gemini_analyze(trailer_url)
         if video_result.get("ok") and isinstance(video_result.get("data"), dict):
             data = video_result["data"]
             if item.get("title"):
                 data["title"] = item.get("title")
-            return {**video_result, "ok": True, "data": data}
+            return {"ok": True, "data": data}
 
     media_label = "影劇" if item.get("mediaType") == "tv" else "電影"
     text_prompt = f"""請根據以下 TMDB {media_label}資料，產生給展覽觀眾搜尋用的電影資料 JSON。
@@ -2988,25 +2308,20 @@ def call_gemini_tmdb(item, provider=None):
 {{
   "title": "中文片名",
   "desc": "25字內簡介",
-  "scenes_main": ["6到10個主要場景，只填具體地點／空間"],
-  "scenes_sub": ["6到10個次要場景，只填具體地點／空間"],
-  "genres": ["10到16個類型與題材關鍵詞"],
-  "emotions": ["8到12個情緒標籤，描述觀眾觀影時的情緒反應"],
-  "atmospheres": ["8到12個氛圍標籤，描述畫面與聽覺的整體質感"],
+  "scenes_main": ["3到6個主要場景，只填具體地點名稱"],
+  "scenes_sub": ["3到6個次要場景，只填具體地點名稱"],
+  "genres": ["6到10個類型與題材關鍵詞"],
+  "emotions": ["4到8個情緒標籤，描述觀眾觀影時的情緒反應"],
+  "atmospheres": ["4到8個氛圍標籤，描述畫面與聽覺的整體質感"],
   "cast": ["演員1名稱", "演員2名稱", "演員3名稱"]
 }}
-
-場景可參考：城市街道、巷弄、公寓、夜市、醫院、學校、辦公室、酒吧、車站、車廂、森林、海邊、廢墟、監獄、法庭、片場、屋頂、地下室、戰場、太空站…
-類型可參考：喜劇、黑色幽默、恐怖、民俗恐怖、驚悚、懸疑、犯罪、科幻、賽博龐克、奇幻、動作、武俠、戰爭、災難、末日、青春、愛情、同志、職場、社會寫實、傳記…
-情緒可參考：緊張、恐懼、不安、憤怒、悲傷、感動、溫馨、孤獨、迷惘、絕望、希望、熱血、爆笑、荒謬、心動、震撼…
-氛圍可參考：黑暗、陰森、壓抑、詭譎、霓虹、復古、寫實、夢幻、清新、頹廢、廢土、港式、台式、手持感、底片感、冷冽、潮濕、壯闊…
 
 重要規則：
 1. scenes_main 和 scenes_sub 只能填具體地點或空間，不要填抽象世界觀
 2. 禁止場景出現：未知世界、冒險市、奇幻世界、魔法世界、異世界、夢境世界、命運舞台、故事世界
 3. genres 不只填片種，也要補題材與可搜尋關鍵詞
 4. emotions 只填情緒反應詞；atmospheres 只填氛圍與視聽質感詞，兩者不可混用
-5. 每個陣列都要去重，不要重複意思太接近的詞；優先具體可搜尋，數量盡量靠近區間上限
+5. 每個陣列都要去重，不要重複意思太接近的詞
 6. 所有輸出都必須使用台灣繁體中文，不可以出現簡體中文"""
 
     payload = {
@@ -3116,7 +2431,7 @@ class Handler(BaseHTTPRequestHandler):
     def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Admin-Key")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def send_json(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -3166,41 +2481,6 @@ class Handler(BaseHTTPRequestHandler):
             with _user_lock:
                 snapshot = dict(user_behavior)
             self.send_json(200, {"ok": True, **global_user_stats(snapshot, movies)})
-
-        elif path == "/api/admin/password-resets":
-            if not admin_key_valid(self.headers.get("X-Admin-Key")):
-                self.send_json(401, {"ok": False, "error": "未授權"})
-                return
-            try:
-                qs = parse_query_string(self.path)
-                requested_limit = int(qs.get("limit") or 20)
-                rows = password_reset_log_read(min(max(requested_limit, 1), 20))
-                self.send_json(200, {"ok": True, "records": rows, "count": len(rows)})
-            except Exception as e:
-                self.send_json(500, {"ok": False, "error": str(e)})
-            return
-
-        elif path == "/api/admin/users":
-            if not admin_key_valid(self.headers.get("X-Admin-Key")):
-                self.send_json(401, {"ok": False, "error": "未授權"})
-                return
-            try:
-                users = []
-                for auth in user_auth_read_all():
-                    users.append({
-                        "userName": auth.get("userName") or "",
-                        "email": auth.get("email") or "",
-                        "forcePasswordChange": bool(auth.get("forcePasswordChange")),
-                        "updatedAt": auth.get("updatedAt") or "",
-                    })
-                users.sort(
-                    key=lambda u: (u.get("updatedAt") or "", u.get("email") or ""),
-                    reverse=True,
-                )
-                self.send_json(200, {"ok": True, "users": users, "count": len(users)})
-            except Exception as e:
-                self.send_json(500, {"ok": False, "error": str(e)})
-            return
 
         elif path in ("/api/admin/push/list", "/api/admin/multi/overview"):
             try:
@@ -3286,19 +2566,6 @@ class Handler(BaseHTTPRequestHandler):
             keys = get_gemini_keys()
             masked = [mask_gemini_api_key(k) for k in keys]
             self.send_json(200, {"ok": True, "keys": masked, "count": len(keys)})
-        elif path == "/config/analyze":
-            tl_key = get_twelvelabs_api_key()
-            masked = ""
-            if tl_key:
-                masked = tl_key[:6] + "..." + tl_key[-4:] if len(tl_key) > 12 else "***"
-            self.send_json(200, {
-                "ok": True,
-                "provider": get_analyze_provider_setting(),
-                "twelvelabsConfigured": bool(tl_key),
-                "twelvelabsKeyMasked": masked,
-                "geminiConfigured": bool(get_gemini_keys()),
-                "model": TWELVELABS_MODEL,
-            })
         elif path == "/config/keys/check":
             try:
                 self.send_json(200, check_all_api_quotas())
@@ -3329,193 +2596,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?")[0]
         body = self.read_body()
-
-        if path == "/api/admin/user/auth":
-            if not admin_key_valid(self.headers.get("X-Admin-Key")):
-                self.send_json(401, {"ok": False, "error": "未授權"})
-                return
-            email = normalize_email(body.get("email"))
-            user_name = str(body.get("userName") or email).strip()
-            new_password = str(body.get("newPassword") or "")
-            if not is_valid_email(email):
-                self.send_json(400, {"ok": False, "error": "請提供有效的 Email"})
-                return
-            password_error = validate_new_password(new_password) if new_password else ""
-            if password_error:
-                self.send_json(400, {"ok": False, "error": password_error})
-                return
-            try:
-                auth = user_auth_find(user_name) or {"userName": user_name}
-                auth.update({
-                    "email": email,
-                    "emailDisplay": str(body.get("email") or email).strip(),
-                    "updatedAt": utc_now(),
-                })
-                if new_password:
-                    auth.update(hash_password(new_password))
-                    auth["forcePasswordChange"] = bool(body.get("forcePasswordChange", False))
-                user_auth_save(auth)
-                self.send_json(200, {
-                    "ok": True,
-                    "userName": user_name,
-                    "email": mask_email(email),
-                    "hasPassword": bool(auth.get("passwordHash")),
-                })
-            except Exception as e:
-                self.send_json(500, {"ok": False, "error": str(e)})
-            return
-
-        if path == "/api/user/register":
-            email = normalize_email(body.get("email"))
-            if not is_valid_email(email):
-                self.send_json(400, {"ok": False, "error": "Email 格式不正確"})
-                return
-            if password_reset_rate_limited(email):
-                self.send_json(429, {"ok": False, "error": "申請太頻繁，請稍後再試"})
-                return
-            try:
-                auth = user_auth_find(email)
-                if auth and auth.get("passwordHash"):
-                    self.send_json(409, {
-                        "ok": False,
-                        "error": "此 Email 已有帳戶，請直接登入或使用忘記密碼",
-                    })
-                    return
-                temporary_password = generate_temporary_password()
-                auth = auth or {
-                    "userName": email,
-                    "email": email,
-                    "emailDisplay": email,
-                }
-                auth.update(hash_password(temporary_password))
-                auth["forcePasswordChange"] = True
-                auth["updatedAt"] = utc_now()
-                user_auth_save(auth)
-                message_id = send_temporary_password_email(
-                    auth["emailDisplay"] or auth["email"],
-                    auth["userName"],
-                    temporary_password,
-                )
-                password_reset_log_append(
-                    auth["userName"],
-                    auth["email"],
-                    "registered",
-                    f"Message ID: {message_id}" if message_id else "帳戶建立並寄送成功",
-                )
-                self.send_json(201, {
-                    "ok": True,
-                    "message": "帳戶已建立，臨時密碼已寄到你的 Email。",
-                    "email": mask_email(email),
-                })
-            except RuntimeError as e:
-                try:
-                    password_reset_log_append(email, email, "failed", str(e), "register")
-                except Exception:
-                    pass
-                self.send_json(503, {"ok": False, "error": str(e)})
-            except Exception:
-                self.send_json(500, {"ok": False, "error": "帳戶申請失敗，請稍後再試"})
-            return
-
-        if path == "/api/user/password/reset":
-            email = normalize_email(body.get("email"))
-            generic = {
-                "ok": True,
-                "message": "如果此 Email 已登記，臨時密碼將寄到該信箱。",
-            }
-            if not is_valid_email(email):
-                self.send_json(400, {"ok": False, "error": "Email 格式不正確"})
-                return
-            if password_reset_rate_limited(email):
-                self.send_json(202, generic)
-                return
-            try:
-                auth = user_auth_find(email)
-                if not auth:
-                    self.send_json(202, generic)
-                    return
-                temporary_password = generate_temporary_password()
-                message_id = send_temporary_password_email(
-                    auth["emailDisplay"] or auth["email"],
-                    auth["userName"],
-                    temporary_password,
-                )
-                auth.update(hash_password(temporary_password))
-                auth["forcePasswordChange"] = True
-                auth["updatedAt"] = utc_now()
-                user_auth_save(auth)
-                password_reset_log_append(
-                    auth["userName"],
-                    auth["email"],
-                    "sent",
-                    f"Message ID: {message_id}" if message_id else "寄送成功",
-                )
-                self.send_json(202, generic)
-            except RuntimeError as e:
-                try:
-                    password_reset_log_append("", email, "failed", str(e))
-                except Exception:
-                    pass
-                self.send_json(503, {"ok": False, "error": str(e)})
-            except Exception as e:
-                try:
-                    password_reset_log_append("", email, "failed", str(e))
-                except Exception:
-                    pass
-                self.send_json(500, {"ok": False, "error": "密碼重設暫時失敗，請稍後再試"})
-            return
-
-        if path == "/api/user/login":
-            identifier = str(body.get("email") or body.get("userName") or "").strip()
-            password = str(body.get("password") or "")
-            if not identifier or not password:
-                self.send_json(400, {"ok": False, "error": "缺少 Email／userName 或密碼"})
-                return
-            try:
-                auth = user_auth_find(identifier)
-                if not auth or not verify_password(password, auth):
-                    self.send_json(401, {"ok": False, "error": "帳號或密碼錯誤"})
-                    return
-                self.send_json(200, {
-                    "ok": True,
-                    "userName": auth["userName"],
-                    "email": mask_email(auth["email"]),
-                    "forcePasswordChange": auth["forcePasswordChange"],
-                })
-            except Exception:
-                self.send_json(500, {"ok": False, "error": "登入服務暫時不可用"})
-            return
-
-        if path == "/api/user/password/change":
-            identifier = str(body.get("email") or body.get("userName") or "").strip()
-            current_password = str(body.get("currentPassword") or "")
-            new_password = str(body.get("newPassword") or "")
-            password_error = validate_new_password(new_password)
-            if not identifier or not current_password:
-                self.send_json(400, {"ok": False, "error": "缺少帳號或目前密碼"})
-                return
-            if password_error:
-                self.send_json(400, {"ok": False, "error": password_error})
-                return
-            try:
-                auth = user_auth_find(identifier)
-                if not auth or not verify_password(current_password, auth):
-                    self.send_json(401, {"ok": False, "error": "帳號或目前密碼錯誤"})
-                    return
-                auth.update(hash_password(new_password))
-                auth["forcePasswordChange"] = False
-                auth["updatedAt"] = utc_now()
-                user_auth_save(auth)
-                password_reset_log_append(
-                    auth["userName"],
-                    auth["email"],
-                    "password_changed",
-                    "使用者已更改密碼",
-                )
-                self.send_json(200, {"ok": True, "message": "密碼已更新"})
-            except Exception:
-                self.send_json(500, {"ok": False, "error": "密碼更新失敗"})
-            return
 
         if path == "/api/search/synonyms":
             groups = body.get("groups")
@@ -3557,6 +2637,16 @@ class Handler(BaseHTTPRequestHandler):
             code = normalize_room_code(body.get("roomCode") or body.get("code") or body.get("room") or "")
             user_name = (body.get("userName") or "").strip()
             doc, err = room_join(code, user_name)
+            if err:
+                self.send_json(404 if err == "房間不存在" else 400, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+            return
+
+        if path == "/api/room/leave":
+            code = normalize_room_code(body.get("roomCode") or body.get("code") or body.get("room") or "")
+            user_name = (body.get("userName") or "").strip()
+            doc, err = room_leave(code, user_name)
             if err:
                 self.send_json(404 if err == "房間不存在" else 400, {"ok": False, "error": err})
                 return
@@ -3751,25 +2841,6 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_db_add(body)
         elif path == "/config/keys":
             self.handle_save_keys(body)
-        elif path == "/config/analyze":
-            try:
-                provider = normalize_analyze_provider(body.get("provider"))
-                if provider:
-                    set_config_text("analyze_provider", provider)
-                tl_key = str(body.get("twelvelabsApiKey") or body.get("twelvelabs_api_key") or "").strip()
-                if tl_key:
-                    set_config_text("twelvelabs_api_key", tl_key)
-                if body.get("clearTwelvelabsKey") is True:
-                    set_config_text("twelvelabs_api_key", "")
-                tl = get_twelvelabs_api_key()
-                self.send_json(200, {
-                    "ok": True,
-                    "provider": get_analyze_provider_setting(),
-                    "twelvelabsConfigured": bool(tl),
-                    "message": "分析設定已儲存",
-                })
-            except Exception as e:
-                self.send_json(500, {"ok": False, "error": str(e)})
         elif path == "/config/keys/add":
             self.handle_add_key(body)
         elif path == "/config/keys/prune":
@@ -3811,8 +2882,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": "缺少 url"})
             return
         try:
-            provider = body.get("provider") or body.get("analyzeProvider")
-            self.send_json(200, call_analyze(yt_url, provider=provider))
+            self.send_json(200, call_gemini_analyze(yt_url))
         except Exception as e:
             traceback.print_exc()
             self.send_json(200, {"ok": False, "error": f"分析程序錯誤: {e}"})
@@ -4058,8 +3128,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": "缺少 TMDB 作品資料"})
             return
         try:
-            provider = body.get("provider") or body.get("analyzeProvider")
-            self.send_json(200, call_gemini_tmdb(item, provider=provider))
+            self.send_json(200, call_gemini_tmdb(item))
         except Exception as e:
             traceback.print_exc()
             self.send_json(200, {"ok": False, "error": f"分析程序錯誤: {e}"})
@@ -4069,7 +3138,6 @@ class Handler(BaseHTTPRequestHandler):
         if not urls:
             self.send_json(400, {"ok": False, "error": "缺少 urls"})
             return
-        provider = body.get("provider") or body.get("analyzeProvider")
         results = []
         for i, url_info in enumerate(urls):
             yt_url = url_info.get("url", "") or (
@@ -4077,15 +3145,13 @@ class Handler(BaseHTTPRequestHandler):
             )
             yt_id = url_info.get("ytId", "")
             try:
-                result = call_analyze(yt_url, provider=provider)
+                result = call_gemini_analyze(yt_url)
             except Exception as e:
                 result = {"ok": False, "error": str(e)}
             if result.get("ok"):
                 p = result["data"]
                 sm = p.get("scenes_main", [])
                 ss = p.get("scenes_sub", [])
-                cast = p.get("cast", [])
-                actors = ", ".join(cast) if isinstance(cast, list) else (cast or "")
                 entry = {
                     "id": uid(),
                     "ytId": yt_id,
@@ -4100,10 +3166,6 @@ class Handler(BaseHTTPRequestHandler):
                     "genres": p.get("genres", []),
                     "emotions": p.get("emotions", []),
                     "atmospheres": p.get("atmospheres", []),
-                    "actors": actors,
-                    "thumb": f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg" if yt_id else "",
-                    "source": "youtube",
-                    "analyzeProvider": result.get("provider") or "",
                 }
                 normalize_movie_record(entry)
                 existing = db_read()

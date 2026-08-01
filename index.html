@@ -205,12 +205,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
     </div>
 
     <div class="nav-label" style="margin-top:6px">APP 專用</div>
-    <div class="nav-item" onclick="go('login',this)">
-      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="6" r="2.5"/><path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5"/></svg>使用者登入
-    </div>
-    <div class="nav-item" onclick="go('users',this)">
-      <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5.5 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/><path d="M10.5 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/><path d="M1 14c0-2.5 2-4.5 4.5-4.5S10 11.5 10 14"/><path d="M10 9.5c2.5 0 4.5 2 4.5 4.5"/></svg>已登記用戶
-    </div>
     <div class="nav-item" onclick="go('sheets',this)">
       <svg class="ni" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="14" rx="2"/><line x1="1" y1="5" x2="15" y2="5"/></svg>APP 電影卡片
     </div>
@@ -295,20 +289,12 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
   <!-- ADD -->
   <div id="panel-add" class="panel">
     <div class="page-head">
-      <div><div class="page-title">新增電影</div><div class="page-sub">分析完後自動存入雲端，所有裝置立即可見</div></div>
+      <div><div class="page-title">新增電影</div><div class="page-sub">Gemini 分析完後自動存入雲端，所有裝置立即可見</div></div>
     </div>
     <div class="steps">
       <div class="step s-active" id="s1">
         <div class="step-head"><div class="step-n">1</div><div class="step-title">輸入 YouTube 預告片網址</div></div>
-        <div class="step-desc">貼上完整連結，系統會分析影片產生場景、類型、情緒與氛圍標籤</div>
-        <div class="field">
-          <label class="fl">分析引擎</label>
-          <select class="fi" id="analyze-provider" style="max-width:320px">
-            <option value="auto">自動（有 TwelveLabs 先用）</option>
-            <option value="twelvelabs">TwelveLabs</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
+        <div class="step-desc">貼上完整連結，Gemini 會直接分析影片產生場景、類型、情緒與氛圍標籤</div>
         <div class="field">
           <input class="fi" id="f-url" type="text" placeholder="https://www.youtube.com/watch?v=..." oninput="onUrl()">
           <div id="yt-tag" style="min-height:20px;margin-top:4px"></div>
@@ -316,10 +302,10 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
         <button class="btn btn-accent" id="btn-analyze" onclick="analyze()" disabled>✦ 開始分析影片</button>
       </div>
       <div class="step" id="s2" style="display:none">
-        <div class="step-head"><div class="step-n">2</div><div class="step-title">分析中</div></div>
+        <div class="step-head"><div class="step-n">2</div><div class="step-title">Gemini 分析中</div></div>
         <div class="sbox show loading" id="analyze-status">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <span class="spin"></span><span id="analyze-msg">正在分析影片內容...</span>
+            <span class="spin"></span><span id="analyze-msg">Gemini 正在分析影片內容...</span>
           </div>
           <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:4px;overflow:hidden">
             <div id="progress-bar" style="height:100%;background:var(--amber);border-radius:99px;width:0%;transition:width 0.8s ease"></div>
@@ -332,7 +318,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       </div>
       <div class="step" id="s3" style="display:none">
         <div class="step-head"><div class="step-n">3</div><div class="step-title">確認並儲存標籤</div></div>
-        <div class="step-desc">從影片直接產生的標籤，可以直接修改</div>
+        <div class="step-desc">Gemini 從影片直接產生的標籤，可以直接修改</div>
         <div class="field"><label class="fl">電影名稱 *</label><input class="fi" id="f-title" type="text"></div>
         <div class="field">
           <label class="fl">上映年份</label>
@@ -568,7 +554,8 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.55">
         <b>APP 多人同步（建議）：</b><br>
         上傳喜好：<code>POST /api/sync/push</code> · 拉取全部：<code>POST /api/sync/pull</code><br>
-        加入房間：<code>POST /api/room/join</code> 或 sync/push 帶 <code>roomCode</code><br>
+        加入房間：<code>POST /api/room/join</code> 或 sync/push 帶 <code>roomCode</code>（多人可同時在房，成員為 append）<br>
+        離開房間：<code>POST /api/room/leave</code> · 查詢：<code>GET /api/room?code=XXXXXX</code><br>
         已發布推薦：<code>GET /api/push/feed?userName=名稱</code> · 全站總覽：<code>GET /api/admin/multi/overview</code>
       </p>
       <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
@@ -582,14 +569,36 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
             <button class="btn btn-accent" onclick="adminCreateRoom()">建立新房間（隨機代碼）</button>
           </div>
         </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px">
+          <div class="field" style="flex:1;min-width:120px">
+            <label class="fl">測試加入 · 房間代碼</label>
+            <input class="fi" id="admin-room-join-code" type="text" placeholder="例如：A1B2C3" style="text-transform:uppercase;letter-spacing:1px">
+          </div>
+          <div class="field" style="flex:1;min-width:120px">
+            <label class="fl">測試使用者名稱</label>
+            <input class="fi" id="admin-room-join-user" type="text" placeholder="例如：Alice">
+          </div>
+          <div class="field" style="flex:0;min-width:100px">
+            <label class="fl">&nbsp;</label>
+            <button class="btn" onclick="adminJoinRoomTest()">加入房間</button>
+          </div>
+          <div class="field" style="flex:0;min-width:100px">
+            <label class="fl">&nbsp;</label>
+            <button class="btn" onclick="adminLeaveRoomTest()">離開房間</button>
+          </div>
+        </div>
         <div id="admin-room-log" style="margin-bottom:10px;font-size:11px;font-family:'DM Mono',monospace;max-width:900px"></div>
+        <div id="admin-room-detail" style="display:none;margin-bottom:12px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;max-width:900px;background:var(--bg2,transparent)">
+          <div style="font-size:12px;margin-bottom:8px"><b id="admin-room-detail-title">房間成員</b></div>
+          <div id="admin-room-detail-members" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        </div>
         <div style="overflow:auto;max-width:100%">
           <table class="tbl" id="admin-room-table" style="width:100%;max-width:900px;font-size:12px">
             <thead>
               <tr>
                 <th>推送代碼</th>
                 <th>房間名稱</th>
-                <th>成員</th>
+                <th>成員（可多人）</th>
                 <th>建立時間</th>
                 <th>上次推送</th>
                 <th>狀態</th>
@@ -630,116 +639,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
       <div class="page-sub" style="margin-bottom:8px" id="admin-push-preview-title">推送預覽</div>
       <div id="admin-push-preview-profile" style="margin-bottom:12px"></div>
       <div id="admin-push-preview-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px"></div>
-    </div>
-  </div>
-
-  <!-- LOGIN -->
-  <div id="panel-login" class="panel">
-    <div class="page-head">
-      <div>
-        <div class="page-title">使用者登入</div>
-        <div class="page-sub">用 Email 登入；忘記密碼可寄送臨時密碼到信箱</div>
-      </div>
-    </div>
-
-    <div style="max-width:420px">
-      <div id="login-session-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:14px">
-        <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">目前登入</div>
-        <div id="login-session-info" style="font-size:12px;color:var(--text2);margin-bottom:10px"></div>
-        <div class="btn-row">
-          <button class="btn btn-sm" onclick="showLoginChangeForm()">更改密碼</button>
-          <button class="btn btn-sm" onclick="logoutUser()">登出</button>
-        </div>
-      </div>
-
-      <div id="login-form-box" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
-        <div class="field">
-          <label class="fl">Email</label>
-          <input class="fi" id="login-email" type="email" autocomplete="username" placeholder="you@example.com">
-        </div>
-        <div class="field">
-          <label class="fl">密碼</label>
-          <input class="fi" id="login-password" type="password" autocomplete="current-password" placeholder="輸入密碼或臨時密碼">
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-accent" id="btn-user-login" onclick="loginUser()">登入</button>
-          <button class="btn btn-sm" id="btn-user-register" onclick="registerUserAccount()">一鍵申請帳戶</button>
-          <button class="btn btn-sm" onclick="showForgotPassword()">忘記密碼</button>
-        </div>
-        <div style="font-size:10.5px;color:var(--text3);margin-top:8px;line-height:1.5">若沒收到密碼，請檢查垃圾郵件。</div>
-        <div class="sbox" id="login-status" style="margin-top:10px"></div>
-      </div>
-
-      <div id="forgot-form-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
-        <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">忘記密碼</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">輸入已登記的 Email，系統會寄送臨時密碼。請用臨時密碼登入後立即更改。<br>若沒收到密碼，請檢查垃圾郵件。</div>
-        <div class="field">
-          <label class="fl">Email</label>
-          <input class="fi" id="forgot-email" type="email" placeholder="you@example.com">
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-accent" id="btn-forgot-password" onclick="requestPasswordReset()">寄送臨時密碼</button>
-          <button class="btn btn-sm" onclick="showLoginForm()">返回登入</button>
-        </div>
-        <div class="sbox" id="forgot-status" style="margin-top:10px"></div>
-      </div>
-
-      <div id="change-form-box" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
-        <div style="font-size:12.5px;font-weight:500;margin-bottom:6px">更改密碼</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55" id="change-form-hint">臨時密碼登入後請立即設定新密碼（至少 10 字元）</div>
-        <div class="field">
-          <label class="fl">Email</label>
-          <input class="fi" id="change-email" type="email" autocomplete="username">
-        </div>
-        <div class="field">
-          <label class="fl">目前密碼／臨時密碼</label>
-          <input class="fi" id="change-current" type="password" autocomplete="current-password">
-        </div>
-        <div class="field">
-          <label class="fl">新密碼</label>
-          <input class="fi" id="change-new" type="password" autocomplete="new-password" placeholder="至少 10 個字元">
-        </div>
-        <div class="field">
-          <label class="fl">確認新密碼</label>
-          <input class="fi" id="change-new2" type="password" autocomplete="new-password">
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-accent" id="btn-change-password" onclick="changeUserPassword()">更新密碼</button>
-          <button class="btn btn-sm" onclick="showLoginForm()">取消</button>
-        </div>
-        <div class="sbox" id="change-status" style="margin-top:10px"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- REGISTERED USERS -->
-  <div id="panel-users" class="panel">
-    <div class="page-head">
-      <div>
-        <div class="page-title">已登記用戶</div>
-        <div class="page-sub">來自 <code>user_auth</code> 的帳戶列表；不顯示密碼</div>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-sm" onclick="loadRegisteredUsers(true)">↻ 重新載入</button>
-      </div>
-    </div>
-    <div class="search-row" style="max-width:420px">
-      <input class="search-inp" id="users-filter" type="search" placeholder="搜尋 Email…" oninput="filterRegisteredUsers()">
-    </div>
-    <div style="font-size:11px;color:var(--text2);margin-bottom:12px" id="registered-users-count">—</div>
-    <div class="tbl-wrap" style="max-width:900px">
-      <table>
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>狀態</th>
-            <th>更新時間</th>
-          </tr>
-        </thead>
-        <tbody id="registered-users-tbody">
-          <tr><td colspan="3" style="color:var(--text3)">載入中…</td></tr>
-        </tbody>
-      </table>
     </div>
   </div>
 
@@ -814,53 +713,6 @@ tbody tr:hover td { background: rgba(255,255,255,0.015); }
           <button class="btn btn-sm" onclick="resetSearchSynonyms()">還原預設</button>
         </div>
         <div class="sbox" id="synonyms-save-status" style="margin-top:10px"></div>
-      </div>
-
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
-        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">TwelveLabs 影片分析</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-          作為 Gemini 之外的分析引擎。Key 存在試算表 <code style="font-size:10px">config</code>
-          （<code style="font-size:10px">twelvelabs_api_key</code> / <code style="font-size:10px">analyze_provider</code>），無需改 Render。<br>
-          申請：<a href="https://www.twelvelabs.io/" target="_blank" style="color:var(--blue)">twelvelabs.io</a>
-          · YouTube 會先下載再上傳分析（較慢）。
-        </div>
-        <div class="field">
-          <label class="fl">預設分析引擎</label>
-          <select class="fi" id="settings-analyze-provider">
-            <option value="auto">自動（有 TwelveLabs 先用）</option>
-            <option value="twelvelabs">TwelveLabs</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
-        <div class="field">
-          <label class="fl">TwelveLabs API Key</label>
-          <input class="fi" id="twelvelabs-key-input" type="password" autocomplete="off" placeholder="貼上 API Key（留空則不變更）">
-          <div class="fhint" id="twelvelabs-key-hint">尚未設定</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-accent" onclick="saveAnalyzeSettings()">儲存分析設定</button>
-          <button class="btn btn-sm" onclick="loadAnalyzeSettings(true)">重新載入</button>
-        </div>
-        <div class="sbox" id="analyze-settings-status" style="margin-top:10px"></div>
-      </div>
-
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-top:14px">
-        <div style="font-size:12.5px;font-weight:500;margin-bottom:5px">使用者密碼重設</div>
-        <div style="font-size:11px;color:var(--text2);margin-bottom:12px;line-height:1.55">
-          使用者可在登入頁一鍵申請帳戶。此處顯示最近 20 筆申請、寄送及密碼更改紀錄；後台不保存可讀密碼。<br>
-          要寄給<strong>任意 Email</strong>：用 <code style="font-size:10px">apps_script_mail.gs</code> 部署 Google Apps Script，
-          再把網址／密語寫進試算表 <code style="font-size:10px">config</code>：
-          <code style="font-size:10px">mail_webhook_url</code>、<code style="font-size:10px">mail_webhook_secret</code>。
-          改表後無需動 Render。
-        </div>
-
-        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-          <div class="btn-row" style="justify-content:space-between;margin-bottom:8px">
-            <div style="font-size:11.5px;font-weight:500">最近 20 筆紀錄</div>
-            <button class="btn btn-sm" onclick="loadPasswordResetRecords(true)">↻ 重新載入</button>
-          </div>
-          <div id="password-reset-records" style="font-size:11px;color:var(--text3)">載入中…</div>
-        </div>
       </div>
     </div>
   </div>
@@ -957,28 +809,9 @@ function readYearInput(id) {
 }
 
 function resolveSaveYear(existing, item, analyzeData) {
-  // Sync fallback only. Prefer TMDB via resolveTheatricalYear(); never trust AI year.
-  const existingY = String(existing?.year || item?.year || '').trim();
-  if (/^\d{4}$/.test(existingY)) return existingY;
-  return '';
-}
-
-/** Theatrical release year from TMDB only (not YouTube upload / AI guess). */
-async function resolveTheatricalYear(item, existing) {
-  const payload = {
-    ...(existing || {}),
-    ...(item || {}),
-    title: (item && item.title) || (existing && existing.title) || '',
-    tmdbId: (item && item.tmdbId) || (existing && existing.tmdbId) || '',
-    mediaType: (item && item.mediaType) || (existing && existing.mediaType) || 'movie',
-    ytId: (item && item.ytId) || (existing && existing.ytId) || ''
-  };
-  try {
-    const { year } = await lookupTheatricalYear(payload);
-    if (/^\d{4}$/.test(year)) return year;
-  } catch (e) {}
-  const keep = String(existing?.year || item?.year || '').trim();
-  return /^\d{4}$/.test(keep) ? keep : '';
+  const py = String(analyzeData?.year || '').trim();
+  if (/^\d{4}$/.test(py)) return py;
+  return movieYear(existing) || item?.year || yearFromDate(item?.publishedAt) || '';
 }
 let serverOnline = false;
 let reanalyzeSelectedIds = new Set();
@@ -1076,23 +909,16 @@ function go(name, el) {
   if (el) el.classList.add('active');
   else {
     const map = {
-      list: 0, add: 1, 'search-yt': 2, login: 3, users: 4, sheets: 5,
-      'user-analyze': 6, 'user-stats': 7, 'admin-push': 8, io: 9, settings: 10
+      list: 0, add: 1, 'search-yt': 2, sheets: 3,
+      'user-analyze': 4, 'user-stats': 5, 'admin-push': 6, io: 7, settings: 8
     };
     document.querySelectorAll('.nav-item')[map[name]]?.classList.add('active');
   }
   if (name === 'list') loadDb();
-  if (name === 'add') {
-    resetAdd();
-    loadAnalyzeSettings(false);
-  }
-  if (name === 'login') refreshLoginPanel();
-  if (name === 'users') loadRegisteredUsers(false);
+  if (name === 'add') resetAdd();
   if (name === 'settings') {
     loadKeyStatus();
     loadSearchSynonyms();
-    loadPasswordResetRecords(false);
-    loadAnalyzeSettings(false);
   }
   if (name === 'admin-push') loadAdminPushDashboard();
   if (name === 'user-stats') loadUserStats();
@@ -1734,11 +1560,6 @@ async function runReanalyzeQueue(items) {
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
         const cleanTitle = item.source === 'tmdb' ? (item.title || '') : await lookupYoutubeCleanTitle(item);
-        const titleFinal = cleanTitle || m.title;
-        const theatricalYear = await resolveTheatricalYear(
-          { ...item, title: titleFinal },
-          m
-        );
         const updated = {
           ...m,
           id: m.id,
@@ -1747,7 +1568,7 @@ async function runReanalyzeQueue(items) {
           tmdbId: item.tmdbId,
           ytId: item.ytId,
           url: item.url,
-          title: titleFinal,
+          title: cleanTitle || m.title,
           desc: p.desc || m.desc || '',
           poster: item.poster,
           thumb: item.thumb,
@@ -1757,15 +1578,8 @@ async function runReanalyzeQueue(items) {
           genres: p.genres || [],
           emotions: p.emotions || [],
           atmospheres: p.atmospheres || [],
-          year: theatricalYear
+          year: resolveSaveYear(m, item, p)
         };
-        if (theatricalYear) {
-          const pub = String(m.publishedAt || '');
-          // Replace YouTube-upload-style dates when we have a real theatrical year
-          if (!pub || pub.startsWith(String(m.year || '') + '-') || yearFromDate(pub) !== theatricalYear) {
-            updated.publishedAt = `${theatricalYear}-01-01`;
-          }
-        }
         await apiFetch('/db', { method: 'POST', body: JSON.stringify(updated) });
         reanalyzeSelectedIds.delete(m.id);
         successCount++;
@@ -1911,10 +1725,7 @@ async function analyze() {
     try {
       r = await apiFetch('/analyze', {
         method: 'POST',
-        body: JSON.stringify({
-          url: ytUrl,
-          provider: document.getElementById('analyze-provider')?.value || 'auto'
-        })
+        body: JSON.stringify({ url: ytUrl })
       });
       if (r.ok) break;
       if (r.error && (r.error.includes('503') || r.error.includes('429'))) {
@@ -1958,16 +1769,9 @@ async function analyze() {
   if (duplicate) p._overwriteId = duplicate.id;
 
   document.getElementById('f-title').value = curVideoTitle || p.title || '';
-  // Theatrical year from TMDB; never use AI / YouTube upload year as release year
-  const titleForYear = document.getElementById('f-title').value;
-  let yearVal = await resolveTheatricalYear(
-    { title: titleForYear, tmdbId: '', mediaType: 'movie', ytId: curYtId },
-    duplicate || null
-  );
-  if (!yearVal) {
-    yearVal = movieYear(duplicate) || '';
-  }
-  document.getElementById('f-year').value = yearVal;
+  const py = String(p.year || '').trim();
+  const analyzedYear = /^\d{4}$/.test(py) ? py : yearFromDate(py);
+  document.getElementById('f-year').value = analyzedYear || curVideoYear || document.getElementById('f-year').value || '';
   document.getElementById('f-desc').value = p.desc || '';
   document.getElementById('f-scenes-main').value = join(p.scenes_main);
   document.getElementById('f-scenes-sub').value = join(p.scenes_sub);
@@ -2148,8 +1952,7 @@ async function searchTmdbYearByTitle(title, mediaType = 'movie') {
   }
 }
 
-/** TMDB theatrical year only — never YouTube upload date. */
-async function lookupTheatricalYear(item) {
+async function lookupReleaseYear(item) {
   const parsed = parseTmdbFromYtId(item.ytId);
   const mediaType = item.mediaType || (parsed && parsed.mediaType) || 'movie';
   const tmdbId = item.tmdbId || (parsed && parsed.tmdbId);
@@ -2169,15 +1972,21 @@ async function lookupTheatricalYear(item) {
     }
   }
 
-  return { year: '', source: '' };
-}
+  const fromPub = yearFromDate(item.publishedAt);
+  if (fromPub) return { year: fromPub, source: '既有日期' };
 
-async function lookupReleaseYear(item) {
-  const tmdb = await lookupTheatricalYear(item);
-  if (tmdb.year) return tmdb;
-
-  const keep = String(item.year || '').trim();
-  if (/^\d{4}$/.test(keep)) return { year: keep, source: '既有年份' };
+  if (isYoutubeVideoId(item.ytId)) {
+    try {
+      const info = await apiFetch('/youtube/info', {
+        method: 'POST',
+        body: JSON.stringify({ ytId: item.ytId, url: item.url || '' })
+      });
+      if (info.ok) {
+        const y = info.year || yearFromDate(info.publishedAt);
+        if (y) return { year: y, source: 'YouTube（上傳年）' };
+      }
+    } catch (e) {}
+  }
 
   return { year: '', source: '' };
 }
@@ -2187,7 +1996,7 @@ async function batchSyncAllYears() {
   if (!db.length) return toast('資料庫是空的', 'err');
   if (!TMDB_API_KEY) return toast('請先設定 TMDB_API_KEY', 'err');
 
-  if (!confirm(`即將為全庫 ${db.length} 部電影同步「上映年份」。\n\n來源：僅 TMDB 上映年（不用 YouTube 上傳年）\n\n確定開始？`)) return;
+  if (!confirm(`即將為全庫 ${db.length} 部電影同步「上映年份」。\n\n優先：TMDB 上映年 → 資料內日期 → YouTube（備援）\n\n確定開始？`)) return;
   const modeFillEmpty = !confirm(
     `第二個選項：\n\n按「確定」= 全部重新查詢（已有年份也會依 TMDB 更新）\n按「取消」= 僅補齊目前沒有年份的電影`
   );
@@ -2926,11 +2735,7 @@ async function analyzeWithRetry(item, msgEl, detailEl, completed, total) {
     try {
       const analyzeRes = await apiFetch(item.source === 'tmdb' ? '/tmdb/analyze' : '/analyze', {
         method: 'POST',
-        body: JSON.stringify(
-          item.source === 'tmdb'
-            ? { item, provider: document.getElementById('analyze-provider')?.value || localStorage.getItem('filmdb_analyze_provider') || 'auto' }
-            : { url, provider: document.getElementById('analyze-provider')?.value || localStorage.getItem('filmdb_analyze_provider') || 'auto' }
-        )
+        body: JSON.stringify(item.source === 'tmdb' ? { item } : { url })
       });
 
       if (analyzeRes.ok) return analyzeRes;
@@ -2990,18 +2795,13 @@ async function ytBatchAnalyze() {
         const p = analyzeRes.data;
         const sm = p.scenes_main || [];
         const ss = p.scenes_sub || [];
-        const entryTitle = cleanMovieTitle(item.title) || item.title || p.title;
-        const theatricalYear = await resolveTheatricalYear(
-          { ...item, title: entryTitle },
-          null
-        );
         const entry = {
           source: item.source || 'youtube',
           mediaType: item.mediaType || 'movie',
           tmdbId: item.tmdbId || '',
           ytId: item.ytId || `tmdb-${item.mediaType || 'movie'}-${item.tmdbId}`,
           url: item.url,
-          title: entryTitle,
+          title: cleanMovieTitle(item.title) || item.title || p.title,
           desc: p.desc || '',
           poster: item.poster || item.thumb || '',
           thumb: item.thumb || item.poster || '',
@@ -3011,10 +2811,8 @@ async function ytBatchAnalyze() {
           emotions: p.emotions || [],
           atmospheres: p.atmospheres || [],
           actors: (p.cast || p.actors || []).join('、'),
-          year: theatricalYear || String(item.year || '').trim() || '',
-          publishedAt: theatricalYear
-            ? `${theatricalYear}-01-01`
-            : (item.publishedAt || '')
+          year: resolveSaveYear(null, item, p),
+          publishedAt: item.publishedAt || ''
         };
 
         const dbRes = await apiFetch('/db', {
@@ -3243,437 +3041,6 @@ async function saveKeys() {
   } catch (e) {
     st.className = 'sbox show err';
     st.textContent = '✗ 儲存失敗：' + e.message;
-  }
-}
-
-const DEFAULT_ADMIN_API_KEY = 'FLTWVls0pzrSlXHxjrJepha3useQg4NN';
-const LOGIN_SESSION_KEY = 'filmdbUserSession';
-
-function getPasswordAdminKey() {
-  return DEFAULT_ADMIN_API_KEY;
-}
-
-function getLoginSession() {
-  try {
-    return JSON.parse(localStorage.getItem(LOGIN_SESSION_KEY) || 'null');
-  } catch (_) {
-    return null;
-  }
-}
-
-function setLoginSession(session) {
-  try {
-    if (session) localStorage.setItem(LOGIN_SESSION_KEY, JSON.stringify(session));
-    else localStorage.removeItem(LOGIN_SESSION_KEY);
-  } catch (_) {}
-}
-
-function showLoginForm() {
-  const login = document.getElementById('login-form-box');
-  const forgot = document.getElementById('forgot-form-box');
-  const change = document.getElementById('change-form-box');
-  if (login) login.style.display = 'block';
-  if (forgot) forgot.style.display = 'none';
-  if (change) change.style.display = 'none';
-}
-
-function showForgotPassword() {
-  const login = document.getElementById('login-form-box');
-  const forgot = document.getElementById('forgot-form-box');
-  const change = document.getElementById('change-form-box');
-  if (login) login.style.display = 'none';
-  if (forgot) forgot.style.display = 'block';
-  if (change) change.style.display = 'none';
-  const email = (document.getElementById('login-email')?.value || '').trim();
-  const forgotEmail = document.getElementById('forgot-email');
-  if (email && forgotEmail) forgotEmail.value = email;
-}
-
-function showLoginChangeForm(force = false) {
-  const session = getLoginSession();
-  const login = document.getElementById('login-form-box');
-  const forgot = document.getElementById('forgot-form-box');
-  const change = document.getElementById('change-form-box');
-  if (login) login.style.display = 'none';
-  if (forgot) forgot.style.display = 'none';
-  if (change) change.style.display = 'block';
-  const hint = document.getElementById('change-form-hint');
-  if (hint) {
-    hint.textContent = force
-      ? '偵測到臨時密碼，請立即設定新密碼（至少 10 字元）'
-      : '請輸入目前密碼，並設定新密碼（至少 10 字元）';
-  }
-  const emailEl = document.getElementById('change-email');
-  if (emailEl) {
-    emailEl.value = session?.emailRaw
-      || document.getElementById('login-email')?.value
-      || session?.userName
-      || '';
-  }
-  const current = document.getElementById('change-current');
-  if (current && !current.value) {
-    current.value = document.getElementById('login-password')?.value || '';
-  }
-}
-
-function refreshLoginPanel() {
-  const session = getLoginSession();
-  const box = document.getElementById('login-session-box');
-  const info = document.getElementById('login-session-info');
-  if (!box || !info) return;
-  if (session?.userName) {
-    box.style.display = 'block';
-    info.innerHTML = `帳號：<b style="color:var(--text)">${escapeHtml(session.email || session.userName)}</b>`
-      + (session.forcePasswordChange
-        ? ' <span style="color:var(--amber)">· 需更改密碼</span>'
-        : '');
-    if (session.forcePasswordChange) showLoginChangeForm(true);
-    else showLoginForm();
-  } else {
-    box.style.display = 'none';
-    showLoginForm();
-  }
-}
-
-async function loginUser() {
-  const email = (document.getElementById('login-email')?.value || '').trim();
-  const password = document.getElementById('login-password')?.value || '';
-  const status = document.getElementById('login-status');
-  const btn = document.getElementById('btn-user-login');
-  if (!email || !password) {
-    status.className = 'sbox show err';
-    status.textContent = '請輸入 Email 與密碼';
-    return;
-  }
-  status.className = 'sbox show loading';
-  status.innerHTML = '<span class="spin"></span> 登入中…';
-  if (btn) btn.disabled = true;
-  try {
-    const r = await apiFetch('/api/user/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
-    if (!r.ok) throw new Error(r.error || '登入失敗');
-    setLoginSession({
-      userName: r.userName,
-      email: r.email,
-      emailRaw: email,
-      forcePasswordChange: !!r.forcePasswordChange,
-      loggedInAt: new Date().toISOString()
-    });
-    const tempPassword = password;
-    status.className = 'sbox show ok';
-    status.textContent = r.forcePasswordChange
-      ? '✓ 登入成功，請立即更改臨時密碼'
-      : `✓ 已登入 ${r.email || r.userName}`;
-    document.getElementById('login-password').value = '';
-    toast(r.forcePasswordChange ? '請更改臨時密碼' : '登入成功', 'ok');
-    refreshLoginPanel();
-    if (r.forcePasswordChange) {
-      const current = document.getElementById('change-current');
-      if (current) current.value = tempPassword;
-      showLoginChangeForm(true);
-    }
-  } catch (e) {
-    status.className = 'sbox show err';
-    status.textContent = '✗ ' + e.message;
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-function logoutUser() {
-  setLoginSession(null);
-  document.getElementById('login-status').className = 'sbox';
-  document.getElementById('login-status').textContent = '';
-  toast('已登出', 'ok');
-  refreshLoginPanel();
-}
-
-async function registerUserAccount() {
-  const email = (document.getElementById('login-email')?.value || '').trim();
-  const status = document.getElementById('login-status');
-  const btn = document.getElementById('btn-user-register');
-  if (!email) {
-    status.className = 'sbox show err';
-    status.textContent = '請先輸入 Email';
-    return;
-  }
-  status.className = 'sbox show loading';
-  status.innerHTML = '<span class="spin"></span> 建立帳戶並寄送臨時密碼…';
-  if (btn) btn.disabled = true;
-  try {
-    const r = await apiFetch('/api/user/register', {
-      method: 'POST',
-      body: JSON.stringify({ email })
-    });
-    if (!r.ok) throw new Error(r.error || '帳戶申請失敗');
-    status.className = 'sbox show ok';
-    status.textContent = '✓ ' + (r.message || '帳戶已建立，請到 Email 收取臨時密碼。') + ' 若沒收到密碼，請檢查垃圾郵件。';
-    toast('帳戶申請成功，請查看 Email', 'ok');
-  } catch (e) {
-    status.className = 'sbox show err';
-    status.textContent = '✗ ' + e.message;
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function requestPasswordReset() {
-  const email = (document.getElementById('forgot-email')?.value || '').trim();
-  const status = document.getElementById('forgot-status');
-  const btn = document.getElementById('btn-forgot-password');
-  if (!email) {
-    status.className = 'sbox show err';
-    status.textContent = '請輸入 Email';
-    return;
-  }
-  status.className = 'sbox show loading';
-  status.innerHTML = '<span class="spin"></span> 寄送中…';
-  if (btn) btn.disabled = true;
-  try {
-    const r = await apiFetch('/api/user/password/reset', {
-      method: 'POST',
-      body: JSON.stringify({ email })
-    });
-    if (!r.ok && r.error) throw new Error(r.error);
-    status.className = 'sbox show ok';
-    status.textContent = '✓ ' + (r.message || '如果此 Email 已登記，臨時密碼將寄到該信箱。') + ' 若沒收到密碼，請檢查垃圾郵件。';
-    toast('已送出重設請求', 'ok');
-  } catch (e) {
-    status.className = 'sbox show err';
-    status.textContent = '✗ ' + e.message;
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-async function changeUserPassword() {
-  const email = (document.getElementById('change-email')?.value || '').trim();
-  const currentPassword = document.getElementById('change-current')?.value || '';
-  const newPassword = document.getElementById('change-new')?.value || '';
-  const newPassword2 = document.getElementById('change-new2')?.value || '';
-  const status = document.getElementById('change-status');
-  const btn = document.getElementById('btn-change-password');
-  if (!email || !currentPassword || !newPassword) {
-    status.className = 'sbox show err';
-    status.textContent = '請填寫所有欄位';
-    return;
-  }
-  if (newPassword !== newPassword2) {
-    status.className = 'sbox show err';
-    status.textContent = '兩次輸入的新密碼不一致';
-    return;
-  }
-  if (newPassword.length < 10) {
-    status.className = 'sbox show err';
-    status.textContent = '新密碼至少需要 10 個字元';
-    return;
-  }
-  status.className = 'sbox show loading';
-  status.innerHTML = '<span class="spin"></span> 更新中…';
-  if (btn) btn.disabled = true;
-  try {
-    const r = await apiFetch('/api/user/password/change', {
-      method: 'POST',
-      body: JSON.stringify({ email, currentPassword, newPassword })
-    });
-    if (!r.ok) throw new Error(r.error || '更新失敗');
-    const session = getLoginSession() || {};
-    setLoginSession({
-      ...session,
-      userName: session.userName || email,
-      emailRaw: email,
-      email: session.email || email,
-      forcePasswordChange: false
-    });
-    document.getElementById('change-current').value = '';
-    document.getElementById('change-new').value = '';
-    document.getElementById('change-new2').value = '';
-    status.className = 'sbox show ok';
-    status.textContent = '✓ 密碼已更新';
-    toast('密碼已更新', 'ok');
-    refreshLoginPanel();
-  } catch (e) {
-    status.className = 'sbox show err';
-    status.textContent = '✗ ' + e.message;
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-function passwordResetStatusLabel(status) {
-  const labels = {
-    registered: '帳戶申請成功',
-    sent: '已寄出臨時密碼',
-    failed: '寄送失敗',
-    password_changed: '使用者已更改密碼'
-  };
-  return labels[status] || status || '未知';
-}
-
-let _registeredUsersCache = [];
-
-function renderRegisteredUsers(users) {
-  _registeredUsersCache = Array.isArray(users) ? users : [];
-  filterRegisteredUsers();
-}
-
-function filterRegisteredUsers() {
-  const tbody = document.getElementById('registered-users-tbody');
-  const countEl = document.getElementById('registered-users-count');
-  const q = (document.getElementById('users-filter')?.value || '').trim().toLowerCase();
-  const users = _registeredUsersCache.filter(row => {
-    if (!q) return true;
-    const email = String(row.email || '').toLowerCase();
-    const name = String(row.userName || '').toLowerCase();
-    return email.includes(q) || name.includes(q);
-  });
-  if (countEl) {
-    countEl.textContent = q
-      ? `顯示 ${users.length} / 共 ${_registeredUsersCache.length} 位`
-      : `共 ${_registeredUsersCache.length} 位`;
-  }
-  if (!tbody) return;
-  if (!_registeredUsersCache.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text3)">尚無已登記用戶</td></tr>';
-    return;
-  }
-  if (!users.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text3)">沒有符合的用戶</td></tr>';
-    return;
-  }
-  tbody.innerHTML = users.map(row => {
-    const at = String(row.updatedAt || '').replace('T', ' ').replace('Z', ' UTC');
-    const status = row.forcePasswordChange
-      ? '<span style="color:var(--amber)">須改密碼</span>'
-      : '<span style="color:var(--accent)">正常</span>';
-    return `<tr>`
-      + `<td class="td-title">${escapeHtml(row.email || row.userName || '—')}</td>`
-      + `<td>${status}</td>`
-      + `<td class="td-mono">${escapeHtml(at || '—')}</td>`
-      + `</tr>`;
-  }).join('');
-}
-
-async function loadRegisteredUsers(force = false) {
-  const tbody = document.getElementById('registered-users-tbody');
-  const key = getPasswordAdminKey();
-  if (!key) {
-    if (force && tbody) {
-      tbody.innerHTML = '<tr><td colspan="3" class="sbox show err">管理金鑰未設定</td></tr>';
-    }
-    return;
-  }
-  if (tbody) {
-    tbody.innerHTML = '<tr><td colspan="3" style="color:var(--amber)">載入用戶列表…</td></tr>';
-  }
-  try {
-    const r = await apiFetch('/api/admin/users', {
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }
-    });
-    if (!r.ok) throw new Error(r.error || '載入失敗');
-    renderRegisteredUsers(r.users || []);
-  } catch (e) {
-    if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="3" style="color:var(--red)">${escapeHtml(e.message)}</td></tr>`;
-    }
-  }
-}
-
-async function loadAnalyzeSettings(force = false) {
-  const hint = document.getElementById('twelvelabs-key-hint');
-  const sel = document.getElementById('settings-analyze-provider');
-  const addSel = document.getElementById('analyze-provider');
-  try {
-    const r = await apiFetch('/config/analyze');
-    if (!r.ok) throw new Error(r.error || '載入失敗');
-    if (sel) sel.value = r.provider || 'auto';
-    if (addSel) addSel.value = r.provider || 'auto';
-    localStorage.setItem('filmdb_analyze_provider', r.provider || 'auto');
-    if (hint) {
-      hint.textContent = r.twelvelabsConfigured
-        ? `已設定（${r.twelvelabsKeyMasked || '****'}）· 模型 ${r.model || 'pegasus1.5'}`
-        : '尚未設定 TwelveLabs Key';
-    }
-  } catch (e) {
-    if (force && hint) hint.textContent = e.message || '載入失敗';
-  }
-}
-
-async function saveAnalyzeSettings() {
-  const status = document.getElementById('analyze-settings-status');
-  const provider = document.getElementById('settings-analyze-provider')?.value || 'auto';
-  const key = document.getElementById('twelvelabs-key-input')?.value?.trim() || '';
-  if (status) {
-    status.className = 'sbox show loading';
-    status.textContent = '儲存中…';
-  }
-  try {
-    const body = { provider };
-    if (key) body.twelvelabsApiKey = key;
-    const r = await apiFetch('/config/analyze', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
-    if (!r.ok) throw new Error(r.error || '儲存失敗');
-    localStorage.setItem('filmdb_analyze_provider', r.provider || provider);
-    const addSel = document.getElementById('analyze-provider');
-    if (addSel) addSel.value = r.provider || provider;
-    if (document.getElementById('twelvelabs-key-input')) {
-      document.getElementById('twelvelabs-key-input').value = '';
-    }
-    await loadAnalyzeSettings(true);
-    if (status) {
-      status.className = 'sbox show ok';
-      status.textContent = r.message || '已儲存';
-    }
-    toast('分析設定已儲存', 'ok');
-  } catch (e) {
-    if (status) {
-      status.className = 'sbox show err';
-      status.textContent = e.message || '儲存失敗';
-    }
-  }
-}
-
-function renderPasswordResetRecords(records) {
-  const el = document.getElementById('password-reset-records');
-  if (!el) return;
-  if (!records?.length) {
-    el.innerHTML = '<div style="padding:8px 0">尚無密碼重設紀錄</div>';
-    return;
-  }
-  el.innerHTML = records.slice(0, 20).map(row => {
-    const ok = row.status === 'registered' || row.status === 'sent' || row.status === 'password_changed';
-    const color = ok ? 'var(--accent)' : 'var(--red)';
-    const at = String(row.at || '').replace('T', ' ').replace('Z', ' UTC');
-    return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">`
-      + `<div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap">`
-      + `<span><b style="color:var(--text)">${escapeHtml(row.userName || '—')}</b> · ${escapeHtml(row.email || '—')}</span>`
-      + `<span style="color:${color};font-weight:500">${escapeHtml(passwordResetStatusLabel(row.status))}</span>`
-      + `</div>`
-      + `<div style="font-size:10px;margin-top:3px">${escapeHtml(at)}${row.detail ? ' · ' + escapeHtml(row.detail) : ''}</div>`
-      + `</div>`;
-  }).join('');
-}
-
-async function loadPasswordResetRecords(force = false) {
-  const el = document.getElementById('password-reset-records');
-  const key = getPasswordAdminKey();
-  if (!key) {
-    if (force && el) el.innerHTML = '<div class="sbox show err">管理金鑰未設定</div>';
-    return;
-  }
-  if (el) el.innerHTML = '<div class="sbox show loading"><span class="spin"></span> 載入重設紀錄…</div>';
-  try {
-    const r = await apiFetch('/api/admin/password-resets?limit=20', {
-      headers: { 'Content-Type': 'application/json', 'X-Admin-Key': key }
-    });
-    if (!r.ok) throw new Error(r.error || '載入失敗');
-    renderPasswordResetRecords(r.records || []);
-  } catch (e) {
-    if (el) el.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -4279,12 +3646,16 @@ function renderAdminRooms(rooms) {
     const status = r.status === "closed"
       ? `<span style="color:var(--text3)">已關閉</span>`
       : `<span style="color:var(--accent)">進行中</span>`;
-    const members = (r.members || []).map(m => escapeHtml(m)).join("、") || "—";
+    const memberList = r.members || [];
+    const membersHtml = memberList.length
+      ? memberList.map(m => `<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 6px;border:1px solid var(--border);border-radius:4px;font-size:10px">${escapeHtml(m)}</span>`).join("")
+      : `<span style="color:var(--text3)">尚無成員</span>`;
     return `<tr>
       <td><b style="font-family:'DM Mono',monospace;letter-spacing:1px;font-size:13px">${code}</b>
-        <button class="btn btn-sm" style="margin-left:6px" onclick="adminCopyRoomCode('${safeCode}')">複製</button></td>
+        <button class="btn btn-sm" style="margin-left:6px" onclick="adminCopyRoomCode('${safeCode}')">複製</button>
+        <button class="btn btn-sm" style="margin-left:4px" onclick="adminShowRoomMembers('${safeCode}')">詳情</button></td>
       <td>${escapeHtml(r.roomName || "—")}</td>
-      <td style="font-size:10px;max-width:160px">${members}<br><span style="color:var(--text3)">${r.memberCount || 0} 人</span></td>
+      <td style="font-size:10px;max-width:220px;line-height:1.7">${membersHtml}<br><span style="color:var(--text3)">${memberList.length} / ${r.maxMembers || 16} 人</span></td>
       <td style="font-size:10px;font-family:'DM Mono',monospace">${escapeHtml(created)}</td>
       <td style="font-size:10px;font-family:'DM Mono',monospace">${escapeHtml(pushed)}</td>
       <td>${status}</td>
@@ -4298,6 +3669,87 @@ function renderAdminRooms(rooms) {
 
 function adminCopyRoomCode(code) {
   navigator.clipboard.writeText(code).then(() => toast(`已複製房間代碼 ${code}`, "ok")).catch(() => toast(code, "ok"));
+}
+
+function showAdminRoomDetail(room) {
+  const box = document.getElementById("admin-room-detail");
+  const title = document.getElementById("admin-room-detail-title");
+  const membersEl = document.getElementById("admin-room-detail-members");
+  if (!box || !membersEl) return;
+  const members = room?.members || [];
+  if (title) {
+    title.textContent = `房間 ${room?.code || ""} · ${members.length} 位成員同時在房`;
+  }
+  membersEl.innerHTML = members.length
+    ? members.map(m => `<span style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">${escapeHtml(m)}</span>`).join("")
+    : `<span style="color:var(--text3);font-size:12px">尚無成員</span>`;
+  box.style.display = "block";
+}
+
+async function adminShowRoomMembers(roomCode) {
+  const log = document.getElementById("admin-room-log");
+  try {
+    const res = await apiFetch(`/api/room?code=${encodeURIComponent(roomCode)}`);
+    if (!res.ok) throw new Error(res.error || "讀取失敗");
+    showAdminRoomDetail(res.room);
+    const joinCode = document.getElementById("admin-room-join-code");
+    if (joinCode) joinCode.value = roomCode;
+  } catch (e) {
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminJoinRoomTest() {
+  const code = document.getElementById("admin-room-join-code")?.value?.trim().toUpperCase() || "";
+  const userName = document.getElementById("admin-room-join-user")?.value?.trim() || "";
+  const log = document.getElementById("admin-room-log");
+  if (!code || !userName) {
+    toast("請填房間代碼與使用者名稱", "err");
+    return;
+  }
+  if (log) log.innerHTML = `<div class="sbox show loading"><span class="spin"></span>加入房間…</div>`;
+  try {
+    const res = await apiFetch("/api/room/join", {
+      method: "POST",
+      body: JSON.stringify({ roomCode: code, userName })
+    });
+    if (!res.ok) throw new Error(res.error || "加入失敗");
+    const members = res.room?.members || [];
+    toast(`${userName} 已加入 · 目前 ${members.length} 人`, "ok");
+    if (log) {
+      log.innerHTML = `<div class="sbox show ok">✓ ${escapeHtml(userName)} 加入 ${escapeHtml(code)} · 成員：${members.map(escapeHtml).join("、") || "—"}（${members.length} 人）</div>`;
+    }
+    showAdminRoomDetail(res.room);
+    loadAdminPushDashboard();
+  } catch (e) {
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function adminLeaveRoomTest() {
+  const code = document.getElementById("admin-room-join-code")?.value?.trim().toUpperCase() || "";
+  const userName = document.getElementById("admin-room-join-user")?.value?.trim() || "";
+  const log = document.getElementById("admin-room-log");
+  if (!code || !userName) {
+    toast("請填房間代碼與使用者名稱", "err");
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/room/leave", {
+      method: "POST",
+      body: JSON.stringify({ roomCode: code, userName })
+    });
+    if (!res.ok) throw new Error(res.error || "離開失敗");
+    const members = res.room?.members || [];
+    toast(`${userName} 已離開 · 剩餘 ${members.length} 人`, "ok");
+    if (log) {
+      log.innerHTML = `<div class="sbox show ok">✓ ${escapeHtml(userName)} 離開 ${escapeHtml(code)} · 剩餘：${members.map(escapeHtml).join("、") || "—"}（${members.length} 人）</div>`;
+    }
+    showAdminRoomDetail(res.room);
+    loadAdminPushDashboard();
+  } catch (e) {
+    if (log) log.innerHTML = `<div class="sbox show err">${escapeHtml(e.message)}</div>`;
+  }
 }
 
 async function adminCreateRoom() {
