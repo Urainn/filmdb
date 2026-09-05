@@ -62,6 +62,17 @@ from room_sync import (
     room_remove_member,
     rooms_overview,
 )
+from auth_users import (
+    hash_password,
+    normalize_auth_user,
+    normalize_username,
+    public_user,
+    username_key,
+    validate_email,
+    validate_password,
+    validate_username,
+    verify_password,
+)
 
 
 
@@ -89,6 +100,7 @@ USER_PREFS_SHEET = os.environ.get("USER_PREFS_SHEET", "user_prefs")
 PUSH_FEED_SHEET = os.environ.get("PUSH_FEED_SHEET", "push_feed")
 USER_EVENTS_SHEET = os.environ.get("USER_EVENTS_SHEET", "user_events")
 ROOMS_SHEET = os.environ.get("ROOMS_SHEET", "multi_rooms")
+AUTH_USERS_SHEET = os.environ.get("AUTH_USERS_SHEET", "moodluma_users")
 PORT = int(os.environ.get("PORT", 8765))
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
@@ -148,6 +160,8 @@ _rooms_cache = {}
 _rooms_lock = threading.RLock()  # short critical sections for cache only
 _room_locks = {}  # per-room Lock: different rooms join/leave in parallel
 _room_locks_guard = threading.Lock()
+_auth_users_cache = {}  # username_key -> auth doc
+_auth_users_lock = threading.RLock()
 
 
 def _get_room_lock(code):
@@ -251,7 +265,15 @@ def ensure_sheet():
     try:
         info = sheets_request("GET", "")
         names = [s["properties"]["title"] for s in info.get("sheets", [])]
-        for name in [SHEET_NAME, CONFIG_SHEET, USER_PREFS_SHEET, PUSH_FEED_SHEET, USER_EVENTS_SHEET, ROOMS_SHEET]:
+        for name in [
+            SHEET_NAME,
+            CONFIG_SHEET,
+            USER_PREFS_SHEET,
+            PUSH_FEED_SHEET,
+            USER_EVENTS_SHEET,
+            ROOMS_SHEET,
+            AUTH_USERS_SHEET,
+        ]:
             if name not in names:
                 sheets_request("POST", ":batchUpdate", {
                     "requests": [{"addSheet": {"properties": {"title": name}}}]
@@ -870,6 +892,158 @@ def load_rooms_from_sheets():
                 merged[code] = cached
         _rooms_cache = merged
     print(f"  已載入 {len(merged)} 個多人房間（{ROOMS_SHEET}）")
+
+
+def auth_users_read_all():
+    """Read moodluma_users sheet: A=username, B=JSON auth doc."""
+    try:
+        encoded = urllib.parse.quote(f"{AUTH_USERS_SHEET}!A:B")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        out = {}
+        for row in rows:
+            if len(row) < 2:
+                continue
+            name = str(row[0]).strip()
+            if not name or name.lower() in ("username", "user", "帳號"):
+                continue
+            try:
+                data = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            data = normalize_auth_user({**data, "username": data.get("username") or name})
+            key = username_key(data["username"])
+            if key:
+                out[key] = data
+        return out
+    except Exception as e:
+        print(f"  auth_users_read_all 錯誤: {e}")
+        return {}
+
+
+def auth_users_find_row(user_name):
+    key = username_key(user_name)
+    try:
+        encoded = urllib.parse.quote(f"{AUTH_USERS_SHEET}!A:A")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        for i, row in enumerate(rows):
+            if row and username_key(row[0]) == key:
+                return i + 1
+    except Exception as e:
+        print(f"  auth_users_find_row 錯誤: {e}")
+    return None
+
+
+def auth_users_save_one(doc):
+    ensure_sheet()
+    doc = normalize_auth_user(doc)
+    name = normalize_username(doc.get("username") or "")
+    if not name:
+        raise ValueError("缺少 username")
+    payload = json.dumps(doc, ensure_ascii=False)
+    row_num = auth_users_find_row(name)
+    if row_num:
+        encoded = urllib.parse.quote(f"{AUTH_USERS_SHEET}!A{row_num}:B{row_num}")
+        sheets_request(
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
+            {"values": [[name, payload]]},
+        )
+    else:
+        encoded = urllib.parse.quote(f"{AUTH_USERS_SHEET}!A:B")
+        sheets_request(
+            "POST",
+            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            {"values": [[name, payload]]},
+        )
+    with _auth_users_lock:
+        _auth_users_cache[username_key(name)] = doc
+    return doc
+
+
+def load_auth_users_from_sheets():
+    global _auth_users_cache
+    loaded = auth_users_read_all()
+    with _auth_users_lock:
+        _auth_users_cache = loaded
+    print(f"  已載入 {len(loaded)} 位 Moodluma 會員（{AUTH_USERS_SHEET}）")
+
+
+def auth_user_get(user_name):
+    key = username_key(user_name)
+    if not key:
+        return None
+    with _auth_users_lock:
+        cached = _auth_users_cache.get(key)
+        if cached:
+            return dict(cached)
+    # cold miss → refresh from sheet
+    loaded = auth_users_read_all()
+    with _auth_users_lock:
+        _auth_users_cache.update(loaded)
+        cached = _auth_users_cache.get(key)
+        return dict(cached) if cached else None
+
+
+def auth_register(username, email, password):
+    err = validate_username(username) or validate_email(email) or validate_password(password)
+    if err:
+        return None, err
+    name = normalize_username(username)
+    if auth_user_get(name):
+        return None, "此帳號已被註冊"
+    # also reject duplicate email (case-insensitive)
+    email_l = email.strip().lower()
+    with _auth_users_lock:
+        for doc in _auth_users_cache.values():
+            if (doc.get("email") or "").strip().lower() == email_l:
+                return None, "此 Email 已被註冊"
+    pwd_hash, salt = hash_password(password)
+    doc = normalize_auth_user({
+        "username": name,
+        "email": email.strip(),
+        "passwordHash": pwd_hash,
+        "salt": salt,
+        "createdAt": utc_now(),
+    })
+    try:
+        saved = auth_users_save_one(doc)
+    except Exception as e:
+        return None, f"儲存失敗: {e}"
+    return public_user(saved), None
+
+
+def auth_login(username, password):
+    err = validate_username(username)
+    if err:
+        return None, err
+    if not password:
+        return None, "缺少密碼"
+    doc = auth_user_get(username)
+    if not doc or not verify_password(password, doc.get("passwordHash") or "", doc.get("salt") or ""):
+        return None, "帳號或密碼錯誤"
+    return public_user(doc), None
+
+
+def auth_reset_password(username, email, new_password):
+    err = validate_username(username) or validate_email(email) or validate_password(new_password)
+    if err:
+        return None, err
+    doc = auth_user_get(username)
+    if not doc:
+        return None, "帳號與註冊 Email 不符合"
+    if (doc.get("email") or "").strip().lower() != email.strip().lower():
+        return None, "帳號與註冊 Email 不符合"
+    pwd_hash, salt = hash_password(new_password)
+    doc["passwordHash"] = pwd_hash
+    doc["salt"] = salt
+    doc["passwordUpdatedAt"] = utc_now()
+    try:
+        saved = auth_users_save_one(doc)
+    except Exception as e:
+        return None, f"儲存失敗: {e}"
+    return public_user(saved), None
 
 
 def room_get(code):
@@ -2633,6 +2807,54 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(500, {"ok": False, "error": str(e)})
             return
 
+        # ========== Moodluma 會員（Sheets moodluma_users） ==========
+        if path == "/api/auth/register":
+            user, err = auth_register(
+                body.get("username") or body.get("userName") or "",
+                body.get("email") or "",
+                body.get("password") or "",
+            )
+            if err:
+                self.send_json(400, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "user": user})
+            return
+
+        if path == "/api/auth/login":
+            user, err = auth_login(
+                body.get("username") or body.get("userName") or "",
+                body.get("password") or "",
+            )
+            if err:
+                self.send_json(401, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "user": user})
+            return
+
+        if path == "/api/auth/reset-password":
+            user, err = auth_reset_password(
+                body.get("username") or body.get("userName") or "",
+                body.get("email") or "",
+                body.get("newPassword") or body.get("password") or "",
+            )
+            if err:
+                self.send_json(400, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "user": user})
+            return
+
+        if path == "/api/auth/me":
+            username = (body.get("username") or body.get("userName") or "").strip()
+            if not username:
+                self.send_json(400, {"ok": False, "error": "缺少 username"})
+                return
+            doc = auth_user_get(username)
+            if not doc:
+                self.send_json(404, {"ok": False, "error": "找不到帳號"})
+                return
+            self.send_json(200, {"ok": True, "user": public_user(doc)})
+            return
+
         if path == "/api/room/join":
             code = normalize_room_code(body.get("roomCode") or body.get("code") or body.get("room") or "")
             user_name = (body.get("userName") or "").strip()
@@ -3209,6 +3431,7 @@ def main():
     load_user_behavior_from_sheets()
     load_push_feed_from_sheets()
     load_rooms_from_sheets()
+    load_auth_users_from_sheets()
     server = ThreadedServer(("0.0.0.0", PORT), Handler)
     print(f"Server running on 0.0.0.0:{PORT}")
     server.serve_forever()
