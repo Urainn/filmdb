@@ -15,6 +15,7 @@ import os
 import time
 import threading
 import base64
+import hashlib
 import sys
 import ssl
 import traceback
@@ -64,6 +65,7 @@ from room_sync import (
 )
 from auth_users import (
     hash_password,
+    issue_auth_token,
     normalize_auth_user,
     normalize_username,
     public_user,
@@ -71,7 +73,14 @@ from auth_users import (
     validate_email,
     validate_password,
     validate_username,
+    verify_auth_token,
     verify_password,
+)
+from moodluma_sync import (
+    default_state,
+    merge_state,
+    normalize_sync_owner,
+    normalize_sync_scope,
 )
 
 
@@ -101,7 +110,11 @@ PUSH_FEED_SHEET = os.environ.get("PUSH_FEED_SHEET", "push_feed")
 USER_EVENTS_SHEET = os.environ.get("USER_EVENTS_SHEET", "user_events")
 ROOMS_SHEET = os.environ.get("ROOMS_SHEET", "multi_rooms")
 AUTH_USERS_SHEET = os.environ.get("AUTH_USERS_SHEET", "moodluma_users")
+MOODLUMA_STATE_SHEET = os.environ.get("MOODLUMA_STATE_SHEET", "moodluma_state")
 PORT = int(os.environ.get("PORT", 8765))
+AUTH_TOKEN_SECRET = os.environ.get("AUTH_TOKEN_SECRET") or hashlib.sha256(
+    f"filmdb-moodluma-auth|{SPREADSHEET_ID}".encode()
+).hexdigest()
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "AIzaSyCMkz2uk_IcRVIoNZNBZ7wQJ6RDdL_KBjI")
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f8abc776cee1400e1fadf2874e1d8c2c")
 
@@ -162,6 +175,8 @@ _room_locks = {}  # per-room Lock: different rooms join/leave in parallel
 _room_locks_guard = threading.Lock()
 _auth_users_cache = {}  # username_key -> auth doc
 _auth_users_lock = threading.RLock()
+_moodluma_state_cache = {}  # (scope, owner) -> data dict
+_moodluma_state_lock = threading.RLock()
 
 
 def _get_room_lock(code):
@@ -273,6 +288,7 @@ def ensure_sheet():
             USER_EVENTS_SHEET,
             ROOMS_SHEET,
             AUTH_USERS_SHEET,
+            MOODLUMA_STATE_SHEET,
         ]:
             if name not in names:
                 sheets_request("POST", ":batchUpdate", {
@@ -1044,6 +1060,121 @@ def auth_reset_password(username, email, new_password):
     except Exception as e:
         return None, f"儲存失敗: {e}"
     return public_user(saved), None
+
+
+def _state_cache_key(scope, owner):
+    return f"{scope}:{owner}"
+
+
+def moodluma_state_read_all():
+    """Sheets moodluma_state: A=scope, B=owner, C=json_data, D=updated_at"""
+    try:
+        encoded = urllib.parse.quote(f"{MOODLUMA_STATE_SHEET}!A:D")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        out = {}
+        for row in rows:
+            if len(row) < 3:
+                continue
+            scope = normalize_sync_scope(row[0])
+            owner = normalize_sync_owner(scope, row[1] if len(row) > 1 else "")
+            if not scope or not owner or str(row[0]).strip().lower() == "scope":
+                continue
+            try:
+                data = json.loads(row[2]) if isinstance(row[2], str) else row[2]
+            except Exception:
+                data = {}
+            if not isinstance(data, dict):
+                data = {}
+            out[_state_cache_key(scope, owner)] = {
+                "scope": scope,
+                "owner": owner,
+                "data": data,
+                "updatedAt": (row[3] if len(row) > 3 else "") or "",
+            }
+        return out
+    except Exception as e:
+        print(f"  moodluma_state_read_all 錯誤: {e}")
+        return {}
+
+
+def moodluma_state_find_row(scope, owner):
+    scope = normalize_sync_scope(scope)
+    owner = normalize_sync_owner(scope, owner)
+    try:
+        encoded = urllib.parse.quote(f"{MOODLUMA_STATE_SHEET}!A:B")
+        rows = sheets_request("GET", f"/values/{encoded}").get("values", [])
+        for i, row in enumerate(rows):
+            if len(row) < 2:
+                continue
+            if normalize_sync_scope(row[0]) == scope and normalize_sync_owner(scope, row[1]) == owner:
+                return i + 1
+    except Exception as e:
+        print(f"  moodluma_state_find_row 錯誤: {e}")
+    return None
+
+
+def moodluma_state_save(scope, owner, data, updated_at=""):
+    ensure_sheet()
+    scope = normalize_sync_scope(scope)
+    owner = normalize_sync_owner(scope, owner)
+    if not scope or not owner:
+        raise ValueError("缺少 scope 或 owner")
+    ts = updated_at or utc_now()
+    payload = json.dumps(data if isinstance(data, dict) else {}, ensure_ascii=False)
+    row_num = moodluma_state_find_row(scope, owner)
+    values = [[scope, owner, payload, ts]]
+    if row_num:
+        encoded = urllib.parse.quote(f"{MOODLUMA_STATE_SHEET}!A{row_num}:D{row_num}")
+        sheets_request(
+            "PUT",
+            f"/values/{encoded}?valueInputOption=RAW",
+            {"values": values},
+        )
+    else:
+        encoded = urllib.parse.quote(f"{MOODLUMA_STATE_SHEET}!A:D")
+        sheets_request(
+            "POST",
+            f"/values/{encoded}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            {"values": values},
+        )
+    rec = {"scope": scope, "owner": owner, "data": dict(data or {}), "updatedAt": ts}
+    with _moodluma_state_lock:
+        _moodluma_state_cache[_state_cache_key(scope, owner)] = rec
+    return rec
+
+
+def load_moodluma_state_from_sheets():
+    global _moodluma_state_cache
+    loaded = moodluma_state_read_all()
+    with _moodluma_state_lock:
+        _moodluma_state_cache = loaded
+    print(f"  已載入 {len(loaded)} 筆 Moodluma 同步狀態（{MOODLUMA_STATE_SHEET}）")
+
+
+def moodluma_state_get(scope, owner):
+    scope = normalize_sync_scope(scope)
+    owner = normalize_sync_owner(scope, owner)
+    if not scope or not owner:
+        return None
+    key = _state_cache_key(scope, owner)
+    with _moodluma_state_lock:
+        cached = _moodluma_state_cache.get(key)
+        if cached:
+            out = dict(cached)
+            out["data"] = dict(cached.get("data") or {})
+            return out
+    loaded = moodluma_state_read_all()
+    with _moodluma_state_lock:
+        _moodluma_state_cache.update(loaded)
+        rec = _moodluma_state_cache.get(key)
+        if rec:
+            return dict(rec)
+    return {
+        "scope": scope,
+        "owner": owner,
+        "data": default_state(scope),
+        "updatedAt": "",
+    }
 
 
 def room_get(code):
@@ -2605,7 +2736,92 @@ class Handler(BaseHTTPRequestHandler):
     def cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+    def _bearer_token(self):
+        raw = (self.headers.get("Authorization") or self.headers.get("authorization") or "").strip()
+        if raw.lower().startswith("bearer "):
+            return raw[7:].strip()
+        return ""
+
+    def _auth_user_from_request(self, body=None):
+        token = self._bearer_token()
+        if not token and isinstance(body, dict):
+            token = str(body.get("token") or "").strip()
+        if not token:
+            return None
+        return verify_auth_token(token, AUTH_TOKEN_SECRET)
+
+    def handle_moodluma_sync_get(self):
+        qs = parse_query_string(self.path)
+        scope = normalize_sync_scope(qs.get("scope") or "")
+        owner = normalize_sync_owner(scope, qs.get("owner") or "")
+        if not scope:
+            self.send_json(400, {"ok": False, "error": "缺少 scope（user 或 room）"})
+            return
+        if not owner:
+            self.send_json(400, {"ok": False, "error": "缺少 owner"})
+            return
+        err = self._authorize_moodluma_sync(scope, owner)
+        if err:
+            self.send_json(err[0], {"ok": False, "error": err[1]})
+            return
+        rec = moodluma_state_get(scope, owner)
+        data = rec.get("data") if rec else default_state(scope)
+        if not isinstance(data, dict):
+            data = default_state(scope)
+        # 補齊預設欄位，前端永遠拿到完整 shape
+        merged = merge_state(default_state(scope), data)
+        self.send_json(200, {"ok": True, "data": merged, "updatedAt": (rec or {}).get("updatedAt") or ""})
+
+    def handle_moodluma_sync_post(self, body):
+        body = body or {}
+        scope = normalize_sync_scope(body.get("scope") or "")
+        owner = normalize_sync_owner(scope, body.get("owner") or "")
+        incoming = body.get("data")
+        merge = body.get("merge")
+        if merge is None:
+            merge = True
+        if not scope:
+            self.send_json(400, {"ok": False, "error": "缺少 scope（user 或 room）"})
+            return
+        if not owner:
+            self.send_json(400, {"ok": False, "error": "缺少 owner"})
+            return
+        if not isinstance(incoming, dict):
+            self.send_json(400, {"ok": False, "error": "缺少 data（物件）"})
+            return
+        err = self._authorize_moodluma_sync(scope, owner, body=body)
+        if err:
+            self.send_json(err[0], {"ok": False, "error": err[1]})
+            return
+        rec = moodluma_state_get(scope, owner)
+        existing = dict((rec or {}).get("data") or {})
+        if merge:
+            data = merge_state(merge_state(default_state(scope), existing), incoming)
+        else:
+            data = merge_state(default_state(scope), incoming)
+        client_ts = str(body.get("updatedAt") or "").strip()
+        try:
+            saved = moodluma_state_save(scope, owner, data, updated_at=client_ts)
+        except Exception as e:
+            self.send_json(500, {"ok": False, "error": str(e)})
+            return
+        self.send_json(200, {"ok": True, "updatedAt": saved.get("updatedAt") or ""})
+
+    def _authorize_moodluma_sync(self, scope, owner, body=None):
+        if scope == "user":
+            token_user = self._auth_user_from_request(body)
+            if not token_user:
+                return (401, "請先登入（缺少或無效 token）")
+            if username_key(token_user) != username_key(owner):
+                return (403, "token 與 owner 不符")
+            return None
+        if scope == "room":
+            if not room_get(owner):
+                return (404, "房間不存在")
+            return None
+        return (400, "不支援的 scope")
 
     def send_json(self, code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -2726,6 +2942,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(200, {"ok": True, "room": room_public_view(doc)})
 
+        elif path == "/api/sync":
+            self.handle_moodluma_sync_get()
+
         elif path == "/db":
             self.send_json(200, {"ok": True, "data": db_read()})
 
@@ -2795,6 +3014,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(code, payload)
             return
 
+        if path == "/api/sync":
+            self.handle_moodluma_sync_post(body)
+            return
+
         # ========== 多人房間 ==========
         if path == "/api/room/create":
             try:
@@ -2817,7 +3040,8 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self.send_json(400, {"ok": False, "error": err})
                 return
-            self.send_json(200, {"ok": True, "user": user})
+            token = issue_auth_token(user["username"], AUTH_TOKEN_SECRET)
+            self.send_json(200, {"ok": True, "user": user, "token": token})
             return
 
         if path == "/api/auth/login":
@@ -2828,10 +3052,11 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self.send_json(401, {"ok": False, "error": err})
                 return
-            self.send_json(200, {"ok": True, "user": user})
+            token = issue_auth_token(user["username"], AUTH_TOKEN_SECRET)
+            self.send_json(200, {"ok": True, "user": user, "token": token})
             return
 
-        if path == "/api/auth/reset-password":
+        if path in ("/api/auth/reset-password", "/api/auth/reset"):
             user, err = auth_reset_password(
                 body.get("username") or body.get("userName") or "",
                 body.get("email") or "",
@@ -2840,7 +3065,7 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self.send_json(400, {"ok": False, "error": err})
                 return
-            self.send_json(200, {"ok": True, "user": user})
+            self.send_json(200, {"ok": True})
             return
 
         if path == "/api/auth/me":
@@ -3432,6 +3657,7 @@ def main():
     load_push_feed_from_sheets()
     load_rooms_from_sheets()
     load_auth_users_from_sheets()
+    load_moodluma_state_from_sheets()
     server = ThreadedServer(("0.0.0.0", PORT), Handler)
     print(f"Server running on 0.0.0.0:{PORT}")
     server.serve_forever()
