@@ -28,10 +28,35 @@ TEMP_HOT = 67
 TEMP_COLD = 33
 TEMP_BLOCK = 20
 
-# 多樣性：已選同類型每多一部，分數懲罰係數
-DIVERSITY_GENRE_PENALTY = 0.32
+# 多樣性：已選同類型每多一部，分數懲罰係數（略降，避免擠掉高精準命中）
+DIVERSITY_GENRE_PENALTY = 0.18
 # 正規化後可視為「有匹配」的最低分
 SCORE_EPS = 1e-6
+# 標籤模糊／跨欄位匹配
+PARTIAL_MATCH_FACTOR = 0.82
+ALIAS_MATCH_FACTOR = 0.94
+CROSS_FAMILY_FACTOR = 0.90
+
+# 常見同義／近似標籤（雙向會在 lookup 時展開）
+TAG_ALIASES: dict[str, set[str]] = {
+    "復古": {"懷舊"},
+    "懷舊": {"復古"},
+    "陰暗": {"陰鬱", "黑暗"},
+    "陰鬱": {"陰暗", "黑暗"},
+    "黑暗": {"陰暗", "陰鬱"},
+    "詭譎": {"詭異"},
+    "詭異": {"詭譎"},
+    "溫暖": {"溫馨", "療癒"},
+    "溫馨": {"溫暖", "療癒"},
+    "療癒": {"溫馨", "溫暖"},
+    "悲傷": {"傷心", "哀傷"},
+    "恐怖": {"驚悚"},
+    "驚悚": {"恐怖"},
+    "孤獨": {"寂寞"},
+    "寂寞": {"孤獨"},
+    "刺激": {"緊張", "興奮"},
+    "浪漫": {"愛情"},
+}
 
 
 def clamp_temperature(value) -> float:
@@ -106,6 +131,80 @@ def _movie_tags(movie: dict) -> dict[str, list[str]]:
         "atmospheres": atmospheres,
         "scenes": _tag_list(scenes),
     }
+
+
+
+def _norm_tag(tag: str) -> str:
+    return str(tag or "").strip().lower().replace(" ", "").replace("　", "")
+
+
+def _alias_norms(tag: str) -> set[str]:
+    raw = str(tag or "").strip()
+    out = set()
+    for key in (raw, _norm_tag(raw)):
+        for a in TAG_ALIASES.get(key, set()):
+            n = _norm_tag(a)
+            if n:
+                out.add(n)
+    return out
+
+
+def _flatten_movie_tags(movie: dict) -> list[tuple[str, str]]:
+    tags = _movie_tags(movie)
+    flat: list[tuple[str, str]] = []
+    for family, vals in tags.items():
+        for tag in vals:
+            if str(tag).strip():
+                flat.append((family, str(tag).strip()))
+    return flat
+
+
+def _best_tag_match(
+    needle: str,
+    movie_tags: list[tuple[str, str]],
+    preferred_family: str | None = None,
+) -> tuple[float, str, str]:
+    """Return (strength 0..1, matched_display_tag, matched_family)."""
+    n = _norm_tag(needle)
+    if not n or len(n) < 1:
+        return 0.0, "", ""
+    aliases = _alias_norms(needle)
+    best_s = 0.0
+    best_tag = ""
+    best_fam = ""
+    for fam, tag in movie_tags:
+        h = _norm_tag(tag)
+        if not h:
+            continue
+        strength = 0.0
+        if h == n:
+            strength = 1.0
+        elif h in aliases or n in _alias_norms(tag):
+            strength = ALIAS_MATCH_FACTOR
+        elif len(n) >= 2 and len(h) >= 2 and (n in h or h in n):
+            shorter, longer = (n, h) if len(n) <= len(h) else (h, n)
+            ratio = len(shorter) / max(1, len(longer))
+            # 情緒／氛圍：只接受高度重疊，避免「神秘」誤打「神秘酒吧」
+            # 類型／場景：允許複合詞（動作 ∈ 科幻動作）
+            # 只在「類型／場景 → 類型／場景」允許複合詞部分匹配
+            # 避免情緒「神秘」誤打場景「神秘酒吧」
+            if preferred_family in ("genres", "scenes") and fam in ("genres", "scenes"):
+                if ratio >= 0.45:
+                    strength = PARTIAL_MATCH_FACTOR * 0.95
+            elif preferred_family in ("emotions", "atmospheres") and fam in ("emotions", "atmospheres"):
+                if ratio >= 0.72:
+                    strength = PARTIAL_MATCH_FACTOR
+            elif ratio >= 0.85:
+                strength = PARTIAL_MATCH_FACTOR * 0.9
+        if strength <= 0:
+            continue
+        if preferred_family and fam != preferred_family:
+            strength *= CROSS_FAMILY_FACTOR
+        if strength > best_s:
+            best_s = strength
+            best_tag = tag
+            best_fam = fam
+    return best_s, best_tag, best_fam
 
 
 def _primary_genre(movie: dict) -> str:
@@ -283,6 +382,13 @@ def score_movie(
     weights: dict | None = None,
     idf: dict[str, dict[str, float]] | None = None,
 ) -> tuple[float, list[str]]:
+    """Score candidate vs warm/cold tag profiles.
+
+    Precision-oriented:
+    - match tags across families (情緒選到「神秘」也能打中氛圍欄)
+    - exact > alias > partial
+    - boost preference coverage; dampen tag-rich movies' accidental hits
+    """
     weights = weights or DEFAULT_WEIGHTS
     idf = idf or {}
     mid = movie.get("id", "")
@@ -291,8 +397,10 @@ def score_movie(
         t = temp_map[mid]
         return -1000.0, [f"已評分（{int(t)}°）"]
 
-    tags = _movie_tags(movie)
-    score = 0.0
+    movie_tags = _flatten_movie_tags(movie)
+    if not movie_tags:
+        return 0.0, []
+
     like_reasons: list[str] = []
     avoid_reasons: list[str] = []
     seen_like: set[str] = set()
@@ -311,44 +419,75 @@ def score_movie(
         seen_avoid.add(tag)
         avoid_reasons.append(f"避開「{tag}」")
 
-    like_keys = (
-        ("genres", "類型", "like_genre"),
-        ("emotions", "情緒", "like_emotion"),
-        ("atmospheres", "氛圍", "like_atmosphere"),
-        ("scenes", "場景", "like_scene"),
+    family_meta = (
+        ("genres", "類型", "like_genre", "dislike_genre"),
+        ("emotions", "情緒", "like_emotion", "dislike_emotion"),
+        ("atmospheres", "氛圍", "like_atmosphere", "dislike_atmosphere"),
+        ("scenes", "場景", "like_scene", "dislike_scene"),
     )
-    for family, prefix, wkey in like_keys:
-        for tag in tags[family]:
-            contrib = (
-                warm_profile[family].get(tag, 0)
-                * weights[wkey]
-                * _idf(idf, family, tag)
-            )
-            if contrib:
-                score += contrib
-                add_like(prefix, tag, contrib)
 
-    dislike_keys = (
-        ("genres", "dislike_genre"),
-        ("emotions", "dislike_emotion"),
-        ("atmospheres", "dislike_atmosphere"),
-        ("scenes", "dislike_scene"),
-    )
-    for family, wkey in dislike_keys:
-        for tag in tags[family]:
-            contrib = (
-                cold_profile[family].get(tag, 0)
-                * weights[wkey]
-                * _idf(idf, family, tag)
-            )
-            if contrib:
-                score -= contrib
-                # 類型排斥較有解釋價值
-                if family == "genres":
-                    add_avoid(tag, contrib)
+    raw_pos = 0.0
+    raw_neg = 0.0
+    total_pref_w = 0.0
+    matched_pref_w = 0.0
+    matched_count = 0
 
+    for family, prefix, like_key, _dislike_key in family_meta:
+        for tag, pref_w in (warm_profile.get(family) or Counter()).items():
+            pw = float(pref_w or 0.0)
+            if pw <= 0:
+                continue
+            total_pref_w += pw
+            strength, hit_tag, hit_fam = _best_tag_match(tag, movie_tags, preferred_family=family)
+            if strength <= 0:
+                continue
+            idf_fam = hit_fam or family
+            contrib = pw * weights[like_key] * _idf(idf, idf_fam, hit_tag or tag) * strength
+            if contrib <= SCORE_EPS:
+                continue
+            raw_pos += contrib
+            matched_pref_w += pw * strength
+            matched_count += 1
+            reason_prefix = {
+                "genres": "類型",
+                "emotions": "情緒",
+                "atmospheres": "氛圍",
+                "scenes": "場景",
+            }.get(hit_fam or family, prefix)
+            add_like(reason_prefix, hit_tag or tag, contrib)
+
+    for family, _prefix, _like_key, dislike_key in family_meta:
+        for tag, pref_w in (cold_profile.get(family) or Counter()).items():
+            pw = float(pref_w or 0.0)
+            if pw <= 0:
+                continue
+            strength, hit_tag, hit_fam = _best_tag_match(tag, movie_tags, preferred_family=family)
+            if strength <= 0:
+                continue
+            idf_fam = hit_fam or family
+            contrib = pw * weights[dislike_key] * _idf(idf, idf_fam, hit_tag or tag) * strength
+            if contrib <= SCORE_EPS:
+                continue
+            raw_neg += contrib
+            if family == "genres" or hit_fam == "genres":
+                add_avoid(hit_tag or tag, contrib)
+
+    if raw_pos <= SCORE_EPS and raw_neg <= SCORE_EPS:
+        return 0.0, []
+
+    coverage = (matched_pref_w / total_pref_w) if total_pref_w > 0 else 0.0
+    unique_movie_tags = len({_norm_tag(t) for _f, t in movie_tags if _norm_tag(t)})
+    # 標籤很多的片容易「碰巧命中」→ 略為壓低
+    richness_dampen = 1.0 / math.sqrt(max(1.0, unique_movie_tags / 5.0))
+    # 覆蓋率高（你選的感覺大多有打中）→ 加權
+    coverage_boost = 0.42 + 0.58 * coverage
+    evidence = 1.0 - math.exp(-matched_count / 2.2) if matched_count else 0.0
+    evidence_boost = 0.85 + 0.15 * evidence
+
+    score = (raw_pos * coverage_boost * richness_dampen * evidence_boost) - raw_neg
     reasons = like_reasons[:4] + avoid_reasons[:2]
     return score, reasons
+
 
 
 def _tag_richness(movie: dict) -> int:
@@ -421,6 +560,122 @@ def _diversify_ranked(
     return picked
 
 
+def warm_profile_from_tag_selections(tag_map: dict | None) -> dict[str, Counter]:
+    """Build warm tag profile from Moodluma room member tags.
+
+    tag_map shape: { "療癒": {"tag":"療癒","weight":0.8,"kind":"mood"}, ... }
+    """
+    profile = {
+        "genres": Counter(),
+        "emotions": Counter(),
+        "atmospheres": Counter(),
+        "scenes": Counter(),
+    }
+    kind_to_family = {
+        "genre": "genres",
+        "mood": "emotions",
+        "emotion": "emotions",
+        "atmosphere": "atmospheres",
+        "scene": "scenes",
+    }
+    if not isinstance(tag_map, dict):
+        return profile
+    for key, meta in tag_map.items():
+        tag = str(key).strip()
+        weight = 0.6
+        kind = "mood"
+        if isinstance(meta, dict):
+            tag = str(meta.get("tag") or tag).strip()
+            try:
+                weight = float(meta.get("weight") or 0.6)
+            except (TypeError, ValueError):
+                weight = 0.6
+            kind = str(meta.get("kind") or "mood").strip().lower()
+        elif isinstance(meta, (int, float)):
+            weight = float(meta)
+        if not tag:
+            continue
+        family = kind_to_family.get(kind, "emotions")
+        profile[family][tag] += max(0.05, min(1.5, weight))
+    return _l1_normalize_profile(profile)
+
+
+def feedbacks_to_temperatures(feedbacks: dict | None) -> dict[str, float]:
+    """Convert Moodluma local feedbacks map → FilmDB temperature map."""
+    temps: dict[str, float] = {}
+    if not isinstance(feedbacks, dict):
+        return temps
+    for mid, fb in feedbacks.items():
+        mid_s = str(mid).strip()
+        if not mid_s:
+            continue
+        if isinstance(fb, dict):
+            if "temperature" in fb or "temp" in fb:
+                temps[mid_s] = clamp_temperature(fb.get("temperature", fb.get("temp")))
+            elif fb.get("rating") == "like":
+                temps[mid_s] = float(TEMP_LIKE)
+            elif fb.get("rating") == "dislike":
+                temps[mid_s] = float(TEMP_DISLIKE)
+        elif isinstance(fb, (int, float)):
+            temps[mid_s] = clamp_temperature(fb)
+    return temps
+
+
+def ranked_movies_from_warm_profile(
+    movies: list[dict],
+    warm_prof: dict[str, Counter],
+    *,
+    exclude_ids: set[str] | None = None,
+    limit: int = 20,
+    weights: dict | None = None,
+    label: str = "標籤偏好",
+) -> tuple[list[tuple[float, dict, list[str]]], dict]:
+    """Rank by an explicit warm tag profile (e.g. room member selections)."""
+    exclude_ids = exclude_ids or set()
+    empty_cold = {
+        "genres": Counter(),
+        "emotions": Counter(),
+        "atmospheres": Counter(),
+        "scenes": Counter(),
+    }
+    has_signal = any(warm_prof.get(k) for k in ("genres", "emotions", "atmospheres", "scenes"))
+    meta: dict[str, Any] = {
+        "coldStart": not has_signal,
+        "source": "tags",
+        "profile": {
+            "topGenres": _top_items(warm_prof.get("genres") or Counter(), 8),
+            "topEmotions": _top_items(warm_prof.get("emotions") or Counter(), 8),
+            "topAtmospheres": _top_items(warm_prof.get("atmospheres") or Counter(), 8),
+            "topScenes": _top_items(warm_prof.get("scenes") or Counter(), 8),
+        },
+    }
+    if not has_signal:
+        ranked = _cold_start_ranked(movies, exclude_ids, limit)
+        meta["candidateCount"] = len(ranked)
+        meta["diversified"] = True
+        return ranked, meta
+
+    idf = _build_catalog_idf(movies)
+    scored: list[tuple[float, dict, list[str]]] = []
+    empty_prefs = {"temperatures": {}, "like": [], "dislike": []}
+    for movie in movies:
+        mid = movie.get("id")
+        if not mid or mid in exclude_ids:
+            continue
+        s, reasons = score_movie(
+            movie, warm_prof, empty_cold, empty_prefs, weights, idf=idf
+        )
+        if s > SCORE_EPS:
+            if not reasons:
+                reasons = [label]
+            scored.append((s, movie, reasons))
+    scored.sort(key=lambda x: -x[0])
+    meta["candidateCount"] = len(scored)
+    diversified = _diversify_ranked(scored, limit)
+    meta["diversified"] = True
+    return diversified, meta
+
+
 def ranked_movies(
     movies: list[dict],
     user_prefs: dict,
@@ -434,6 +689,7 @@ def ranked_movies(
     meta: dict[str, Any] = {
         "coldStart": not warm_ids,
         "profile": summarize_profile(movies_by_id, user_prefs),
+        "source": "prefs",
     }
 
     if not warm_ids:

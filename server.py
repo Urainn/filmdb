@@ -33,10 +33,14 @@ from recommend_engine import (
     TEMP_DISLIKE,
     TEMP_LIKE,
     clamp_temperature,
+    feedbacks_to_temperatures,
     global_user_stats,
     movie_emotion_atmosphere_tags,
+    prefs_ready_for_push,
     ranked_movies,
+    ranked_movies_from_warm_profile,
     summarize_profile,
+    warm_profile_from_tag_selections,
 )
 from search_synonyms import (
     DEFAULT_SEARCH_SYNONYM_GROUPS,
@@ -690,6 +694,89 @@ def build_recommend_cards(movies, user_prefs, limit=20):
     return cards, meta
 
 
+def build_recommend_cards_from_tags(movies, tag_map, limit=20, exclude_ids=None):
+    warm = warm_profile_from_tag_selections(tag_map)
+    ranked, meta = ranked_movies_from_warm_profile(
+        movies, warm, exclude_ids=exclude_ids, limit=limit, weights=DEFAULT_WEIGHTS
+    )
+    cards = [movie_to_sheets_card(m, score=s, match_reasons=reasons) for s, m, reasons in ranked]
+    return cards, meta
+
+
+def merge_feedbacks_into_prefs(user_name, feedbacks):
+    """Bridge Moodluma feedbacks → user_prefs temperatures and persist."""
+    temps_fb = feedbacks_to_temperatures(feedbacks)
+    if not temps_fb:
+        return get_user_prefs(user_name), False
+    u = get_user_prefs(user_name)
+    temps = dict(u.get("temperatures") or {})
+    changed = False
+    for mid, temp in temps_fb.items():
+        prev = temps.get(mid)
+        if prev is None or abs(float(prev) - float(temp)) > 0.05:
+            temps[mid] = temp
+            changed = True
+    if not changed:
+        return normalize_prefs(u), False
+    u["temperatures"] = temps
+    u["updatedAt"] = utc_now()
+    normalized = normalize_prefs(u)
+    with _user_lock:
+        user_behavior[user_name] = normalized
+    persist_user_prefs(user_name)
+    return normalized, True
+
+
+def auto_publish_personal_recommend(user_name, limit=20, message="", force=False):
+    """Publish personal push_feed when prefs are warm enough (and stale unless force)."""
+    prefs = get_user_prefs(user_name)
+    if not prefs_ready_for_push(prefs):
+        return None, "尚無足夠喜好（需有高於中性的評分）"
+    feed = push_feed_get(user_name)
+    if not force and feed and feed.get("cards") and not push_is_stale(prefs, feed):
+        return feed, None
+    msg = (message or "根據你的喜好為你推薦").strip()
+    doc = admin_publish_push(user_name, limit=limit, message=msg)
+    return doc, None
+
+
+def admin_build_push_payload_from_tags(user_name, tag_map, limit=20, message=""):
+    movies = db_read()
+    cards, meta = build_recommend_cards_from_tags(movies, tag_map, limit=limit)
+    return {
+        "userName": user_name,
+        "publishedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "message": (message or "").strip(),
+        "limit": limit,
+        "coldStart": bool(meta.get("coldStart")),
+        "source": "tags",
+        "profile": meta.get("profile") or {},
+        "cards": cards,
+        "cardCount": len(cards),
+    }
+
+
+def admin_publish_push_from_tags(user_name, tag_map, limit=20, message=""):
+    doc = admin_build_push_payload_from_tags(user_name, tag_map, limit=limit, message=message)
+    push_feed_save_one(user_name, doc)
+    return doc
+
+
+def _moodluma_room_member_tags(code):
+    """Map member display name → tag selections from moodluma_state room blob."""
+    rec = moodluma_state_get("room", code)
+    data = (rec or {}).get("data") or {}
+    out = {}
+    for m in data.get("members") or []:
+        if not isinstance(m, dict):
+            continue
+        name = str(m.get("name") or "").strip()
+        tags = m.get("tags")
+        if name and isinstance(tags, dict) and tags:
+            out[name] = tags
+    return out
+
+
 def parse_query_string(path_with_query):
     if "?" not in path_with_query:
         return {}
@@ -1290,7 +1377,12 @@ def room_close(code):
         return rooms_save_one(doc, merge_members=True), None
 
 
-def room_publish_all_members(code, limit=20, message=""):
+def room_recommend_all_members(code, limit=20, message="", publish=True, member_tags=None):
+    """Build per-member recommend lists from prefs and/or Moodluma tag selections.
+
+    When publish=True, each successful list is written to that member's push_feed.
+    member_tags: optional { name: {tag: {tag,weight,kind}, ...}, ... } from APP.
+    """
     code = normalize_room_code(code)
     with _get_room_lock(code):
         doc = _room_resolve(code)
@@ -1298,47 +1390,119 @@ def room_publish_all_members(code, limit=20, message=""):
         return None, "房間不存在"
     if doc.get("status") == "closed":
         return None, "房間已關閉"
-    members = list(doc.get("members") or [])
-    if not members:
+
+    tag_by_name = _moodluma_room_member_tags(code)
+    if isinstance(member_tags, dict):
+        for name, tags in member_tags.items():
+            name_s = str(name or "").strip()
+            if name_s and isinstance(tags, dict) and tags:
+                tag_by_name[name_s] = tags
+    names = []
+    seen = set()
+    for name in list(doc.get("members") or []):
+        name_s = str(name or "").strip()
+        if name_s and name_s not in seen:
+            seen.add(name_s)
+            names.append(name_s)
+    for name in tag_by_name.keys():
+        if name not in seen:
+            seen.add(name)
+            names.append(name)
+    if not names:
         return None, "房間尚無成員"
-    msg = (message or doc.get("message") or "").strip()
+
+    msg = (message or doc.get("message") or "房間個人推薦").strip()
+    movies = db_read()
     results = []
-    for name in members:
+    for name in names:
         prefs = get_user_prefs(name)
-        if not (prefs.get("like") or prefs.get("temperatures")):
-            results.append({
-                "userName": name,
-                "ok": False,
-                "skipped": True,
-                "error": "尚無喜好記錄",
-            })
-            continue
+        tags = tag_by_name.get(name)
         try:
-            pub = admin_publish_push(name, limit=limit, message=msg)
-            results.append({
-                "userName": name,
-                "ok": True,
-                "cardCount": pub.get("cardCount", 0),
-                "publishedAt": pub.get("publishedAt"),
-            })
+            if prefs_ready_for_push(prefs):
+                if publish:
+                    pub = admin_publish_push(name, limit=limit, message=msg)
+                else:
+                    cards, meta = build_recommend_cards(movies, prefs, limit=limit)
+                    pub = {
+                        "userName": name,
+                        "cards": cards,
+                        "cardCount": len(cards),
+                        "coldStart": bool(meta.get("coldStart")),
+                        "source": "prefs",
+                        "profile": meta.get("profile") or {},
+                        "publishedAt": None,
+                        "message": msg,
+                    }
+                results.append({
+                    "userName": name,
+                    "ok": True,
+                    "source": "prefs",
+                    "cardCount": pub.get("cardCount", 0),
+                    "publishedAt": pub.get("publishedAt"),
+                    "coldStart": pub.get("coldStart"),
+                    "cards": pub.get("cards") or [],
+                    "profile": pub.get("profile") or {},
+                })
+            elif tags:
+                if publish:
+                    pub = admin_publish_push_from_tags(name, tags, limit=limit, message=msg)
+                else:
+                    cards, meta = build_recommend_cards_from_tags(movies, tags, limit=limit)
+                    pub = {
+                        "userName": name,
+                        "cards": cards,
+                        "cardCount": len(cards),
+                        "coldStart": bool(meta.get("coldStart")),
+                        "source": "tags",
+                        "profile": meta.get("profile") or {},
+                        "publishedAt": None,
+                        "message": msg,
+                    }
+                results.append({
+                    "userName": name,
+                    "ok": True,
+                    "source": "tags",
+                    "cardCount": pub.get("cardCount", 0),
+                    "publishedAt": pub.get("publishedAt"),
+                    "coldStart": pub.get("coldStart"),
+                    "cards": pub.get("cards") or [],
+                    "profile": pub.get("profile") or {},
+                })
+            else:
+                results.append({
+                    "userName": name,
+                    "ok": False,
+                    "skipped": True,
+                    "error": "尚無喜好記錄或標籤偏好",
+                    "cards": [],
+                })
         except Exception as e:
-            results.append({"userName": name, "ok": False, "error": str(e)})
-    with _get_room_lock(code):
-        fresh = _room_resolve(code) or doc
-        fresh["lastPushAt"] = utc_now()
-        if msg:
-            fresh["message"] = msg
-        rooms_save_one(fresh, merge_members=True)
-        last_push = fresh["lastPushAt"]
+            results.append({"userName": name, "ok": False, "error": str(e), "cards": []})
+
+    last_push = None
+    if publish:
+        with _get_room_lock(code):
+            fresh = _room_resolve(code) or doc
+            fresh["lastPushAt"] = utc_now()
+            if msg:
+                fresh["message"] = msg
+            rooms_save_one(fresh, merge_members=True)
+            last_push = fresh["lastPushAt"]
+
     ok_n = sum(1 for r in results if r.get("ok"))
     return {
         "ok": True,
         "roomCode": code,
-        "published": ok_n,
+        "published": ok_n if publish else 0,
         "total": len(results),
         "results": results,
         "lastPushAt": last_push,
+        "publish": bool(publish),
     }, None
+
+
+def room_publish_all_members(code, limit=20, message=""):
+    return room_recommend_all_members(code, limit=limit, message=message, publish=True)
 
 def admin_build_push_payload(user_name, limit=20, message=""):
     movies = db_read()
@@ -1458,8 +1622,8 @@ def admin_republish_stale_users(limit=20, message=""):
         if not push_is_stale(prefs, feed):
             results.append({"userName": name, "ok": False, "skipped": True, "reason": "推送仍為最新"})
             continue
-        if not prefs.get("like"):
-            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無喜歡"})
+        if not prefs_ready_for_push(prefs):
+            results.append({"userName": name, "ok": False, "skipped": True, "reason": "尚無足夠喜好"})
             continue
         try:
             doc = admin_publish_push(name, limit=limit, message=message)
@@ -1526,8 +1690,10 @@ def handle_sync_push(body):
     limit = int(body.get("limit") or 20)
     message = (body.get("message") or "").strip()
     published = None
-    if auto_publish and merged.get("like"):
-        published = admin_publish_push(user_name, limit=limit, message=message)
+    if auto_publish and prefs_ready_for_push(merged):
+        published, _pub_err = auto_publish_personal_recommend(
+            user_name, limit=limit, message=message, force=bool(body.get("forcePublish"))
+        )
     feed = push_feed_get(user_name)
     movies = db_read()
     payload = build_sync_pull_payload(user_name, merged, feed, movies)
@@ -2807,7 +2973,29 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json(500, {"ok": False, "error": str(e)})
             return
-        self.send_json(200, {"ok": True, "updatedAt": saved.get("updatedAt") or ""})
+
+        published = None
+        prefs_bridged = False
+        if scope == "user" and isinstance(data.get("feedbacks"), dict):
+            _prefs, prefs_bridged = merge_feedbacks_into_prefs(owner, data.get("feedbacks"))
+            auto_pub = body.get("autoPublishRecommend")
+            if auto_pub is None:
+                auto_pub = True
+            if auto_pub and prefs_ready_for_push(get_user_prefs(owner)):
+                published, _err = auto_publish_personal_recommend(
+                    owner,
+                    limit=int(body.get("limit") or 20),
+                    message=(body.get("message") or "").strip(),
+                    force=bool(body.get("forcePublish")),
+                )
+
+        out = {"ok": True, "updatedAt": saved.get("updatedAt") or ""}
+        if prefs_bridged:
+            out["prefsBridged"] = True
+        if published:
+            out["published"] = True
+            out["pushFeed"] = published
+        self.send_json(200, out)
 
     def _authorize_moodluma_sync(self, scope, owner, body=None):
         if scope == "user":
@@ -2840,6 +3028,55 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def send_static_file(self, file_path, content_type, cache_control="public, max-age=60"):
+        try:
+            with open(file_path, "rb") as f:
+                body = f.read()
+        except OSError:
+            self.send_json(404, {"ok": False, "error": "not found"})
+            return
+        self.send_response(200)
+        self.cors()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if cache_control:
+            self.send_header("Cache-Control", cache_control)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def serve_moodluma_web(self, path):
+        """Serve synced Moodluma frontend at /moodluma/ (same-origin with APIs)."""
+        base = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "moodluma_web"))
+        rel = path[len("/moodluma"):].lstrip("/")
+        if not rel or rel.endswith("/"):
+            rel = (rel + "index.html") if rel else "index.html"
+        candidate = os.path.abspath(os.path.join(base, rel))
+        if not candidate.startswith(base + os.sep) and candidate != base:
+            self.send_json(404, {"ok": False, "error": "not found"})
+            return
+        if os.path.isdir(candidate):
+            candidate = os.path.join(candidate, "index.html")
+        if not os.path.isfile(candidate):
+            self.send_json(404, {"ok": False, "error": "not found"})
+            return
+        ext = os.path.splitext(candidate)[1].lower()
+        types = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
+            ".webmanifest": "application/manifest+json",
+        }
+        ctype = types.get(ext, "application/octet-stream")
+        cache = "no-cache" if ext in (".html", ".js") else "public, max-age=3600"
+        self.send_static_file(candidate, ctype, cache_control=cache)
 
     def read_body(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -2923,6 +3160,40 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(200, {"ok": True, "hasFeed": True, **feed})
 
+        elif path in ("/api/recommend/me", "/api/user/recommend"):
+            qs = parse_query_string(self.path)
+            token_user = self._auth_user_from_request()
+            user_name = (qs.get("userName") or qs.get("user") or qs.get("username") or "").strip()
+            if token_user:
+                user_name = token_user
+            if not user_name:
+                self.send_json(401, {"ok": False, "error": "請先登入或提供 userName"})
+                return
+            limit = int(qs.get("limit") or 20)
+            publish = qs.get("publish") in ("1", "true", "yes")
+            force = qs.get("force") in ("1", "true", "yes")
+            movies = db_read()
+            prefs = get_user_prefs(user_name)
+            published_doc = None
+            if publish and prefs_ready_for_push(prefs):
+                published_doc, _err = auto_publish_personal_recommend(
+                    user_name, limit=limit, force=force
+                )
+            cards, meta = build_recommend_cards(movies, prefs, limit=limit)
+            feed = published_doc or push_feed_get(user_name)
+            self.send_json(200, {
+                "ok": True,
+                "userName": user_name,
+                "published": bool(published_doc),
+                "coldStart": bool(meta.get("coldStart")),
+                "source": meta.get("source") or "prefs",
+                "profile": meta.get("profile") or {},
+                "cards": cards if cards else (feed.get("cards") if feed else []),
+                "cardCount": len(cards) if cards else len((feed or {}).get("cards") or []),
+                "pushFeed": feed,
+                "hasFeed": bool(feed and feed.get("cards")),
+            })
+
         elif path == "/api/room/list":
             try:
                 rooms = rooms_overview(rooms_read_all())
@@ -2983,6 +3254,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_html(f.read())
             else:
                 self.send_json(404, {"ok": False, "error": "index.html 不存在"})
+        elif path == "/moodluma" or path.startswith("/moodluma/"):
+            self.serve_moodluma_web(path)
         else:
             self.send_json(404, {"ok": False, "error": "not found"})
 
@@ -3053,7 +3326,30 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"ok": False, "error": err})
                 return
             token = issue_auth_token(user["username"], AUTH_TOKEN_SECRET)
-            self.send_json(200, {"ok": True, "user": user, "token": token})
+            payload = {"ok": True, "user": user, "token": token}
+            # 登入後若已有喜好，自動刷新個人推薦推送
+            try:
+                limit = int(body.get("limit") or 20)
+                pub, pub_err = auto_publish_personal_recommend(
+                    user["username"],
+                    limit=limit,
+                    message=(body.get("message") or "登入個人推薦").strip(),
+                    force=False,
+                )
+                if pub:
+                    payload["recommend"] = {
+                        "published": True,
+                        "cardCount": pub.get("cardCount", 0),
+                        "publishedAt": pub.get("publishedAt"),
+                        "coldStart": pub.get("coldStart"),
+                        "cards": pub.get("cards") or [],
+                        "message": pub.get("message") or "",
+                    }
+                elif pub_err:
+                    payload["recommend"] = {"published": False, "skipped": True, "error": pub_err}
+            except Exception as e:
+                payload["recommend"] = {"published": False, "error": str(e)}
+            self.send_json(200, payload)
             return
 
         if path in ("/api/auth/reset-password", "/api/auth/reset"):
@@ -3111,6 +3407,46 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, result)
             return
 
+        if path == "/api/room/recommend":
+            code = normalize_room_code(body.get("roomCode") or body.get("code") or "")
+            limit = int(body.get("limit") or 20)
+            message = (body.get("message") or "").strip()
+            publish = body.get("publish")
+            if publish is None:
+                publish = False
+            member_tags = {}
+            raw_members = body.get("members")
+            if isinstance(raw_members, list):
+                for m in raw_members:
+                    if not isinstance(m, dict):
+                        continue
+                    n = str(m.get("name") or m.get("userName") or "").strip()
+                    tags = m.get("tags")
+                    if n and isinstance(tags, dict) and tags:
+                        member_tags[n] = tags
+            elif isinstance(raw_members, dict):
+                for n, tags in raw_members.items():
+                    name_s = str(n or "").strip()
+                    if name_s and isinstance(tags, dict) and tags:
+                        member_tags[name_s] = tags
+            if isinstance(body.get("memberTags"), dict):
+                for n, tags in body["memberTags"].items():
+                    name_s = str(n or "").strip()
+                    if name_s and isinstance(tags, dict) and tags:
+                        member_tags[name_s] = tags
+            result, err = room_recommend_all_members(
+                code,
+                limit=limit,
+                message=message,
+                publish=bool(publish),
+                member_tags=member_tags or None,
+            )
+            if err:
+                self.send_json(404 if "不存在" in err else 400, {"ok": False, "error": err})
+                return
+            self.send_json(200, result)
+            return
+
         if path == "/api/room/close":
             code = normalize_room_code(body.get("roomCode") or body.get("code") or "")
             doc, err = room_close(code)
@@ -3160,7 +3496,16 @@ class Handler(BaseHTTPRequestHandler):
                 [{"type": "rate", "movieId": movieId, "temperature": temp}],
                 body.get("deviceId", ""),
             )
-            self.send_json(200, {"ok": True, "user": u, "temperature": temp})
+            published = None
+            if body.get("autoPublishRecommend", True):
+                published, _err = auto_publish_personal_recommend(
+                    userName, limit=int(body.get("limit") or 20), force=False
+                )
+            out = {"ok": True, "user": u, "temperature": temp}
+            if published:
+                out["published"] = True
+                out["pushFeed"] = published
+            self.send_json(200, out)
             return
 
         # ========== APP 喜歡（相容 → 85°） ==========
@@ -3172,7 +3517,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             u = set_user_temperature(userName, movieId, TEMP_LIKE)
             user_events_append(userName, [{"type": "like", "movieId": movieId}], body.get("deviceId", ""))
-            self.send_json(200, {"ok": True, "user": u, "temperature": TEMP_LIKE})
+            published = None
+            if body.get("autoPublishRecommend", True):
+                published, _err = auto_publish_personal_recommend(
+                    userName, limit=int(body.get("limit") or 20), force=False
+                )
+            out = {"ok": True, "user": u, "temperature": TEMP_LIKE}
+            if published:
+                out["published"] = True
+                out["pushFeed"] = published
+            self.send_json(200, out)
             return
 
         # ========== APP 取得使用者 ==========
@@ -3265,6 +3619,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, result)
             except Exception as e:
                 self.send_json(500, {"ok": False, "error": str(e)})
+            return
+
+        # ========== 登入帳號個人推薦（可自動寫入 push_feed） ==========
+        if path in ("/api/recommend/me", "/api/user/recommend"):
+            token_user = self._auth_user_from_request(body)
+            user_name = (body.get("userName") or body.get("username") or "").strip()
+            if token_user:
+                user_name = token_user
+            if not user_name:
+                self.send_json(401, {"ok": False, "error": "請先登入或提供 userName"})
+                return
+            if token_user and username_key(token_user) != username_key(user_name):
+                self.send_json(403, {"ok": False, "error": "token 與 userName 不符"})
+                return
+            limit = int(body.get("limit") or 20)
+            publish = body.get("publish")
+            if publish is None:
+                publish = True
+            force = bool(body.get("forcePublish") or body.get("force"))
+            message = (body.get("message") or "個人推薦").strip()
+            feedbacks = body.get("feedbacks")
+            if isinstance(feedbacks, dict):
+                merge_feedbacks_into_prefs(user_name, feedbacks)
+            movies = db_read()
+            prefs = get_user_prefs(user_name)
+            published_doc = None
+            if publish and prefs_ready_for_push(prefs):
+                published_doc, _err = auto_publish_personal_recommend(
+                    user_name, limit=limit, message=message, force=force
+                )
+            cards, meta = build_recommend_cards(movies, prefs, limit=limit)
+            self.send_json(200, {
+                "ok": True,
+                "userName": user_name,
+                "published": bool(published_doc),
+                "coldStart": bool(meta.get("coldStart")),
+                "source": meta.get("source") or "prefs",
+                "profile": meta.get("profile") or {},
+                "cards": cards,
+                "cardCount": len(cards),
+                "pushFeed": published_doc or push_feed_get(user_name),
+            })
             return
 
         # ========== APP 個人化推薦 ==========
