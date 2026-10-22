@@ -13,6 +13,7 @@ DEFAULT_USER_STATE = {
     "feedbacks": {},
     "viewCounts": {},
     "bubbleMode": "normal",
+    "tagSearchHistory": [],
 }
 
 DEFAULT_ROOM_STATE = {

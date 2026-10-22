@@ -3645,21 +3645,56 @@ class Handler(BaseHTTPRequestHandler):
             movies = db_read()
             prefs = get_user_prefs(user_name)
             published_doc = None
-            if publish and prefs_ready_for_push(prefs):
-                published_doc, _err = auto_publish_personal_recommend(
-                    user_name, limit=limit, message=message, force=force
-                )
-            cards, meta = build_recommend_cards(movies, prefs, limit=limit)
+            raw_tags = body.get("tags") or body.get("selectedTags")
+            if isinstance(raw_tags, dict) and raw_tags:
+                cards, meta = build_recommend_cards_from_tags(movies, raw_tags, limit=limit)
+                source = "tags"
+            else:
+                if publish and prefs_ready_for_push(prefs):
+                    published_doc, _err = auto_publish_personal_recommend(
+                        user_name, limit=limit, message=message, force=force
+                    )
+                cards, meta = build_recommend_cards(movies, prefs, limit=limit)
+                source = meta.get("source") or "prefs"
             self.send_json(200, {
                 "ok": True,
                 "userName": user_name,
                 "published": bool(published_doc),
                 "coldStart": bool(meta.get("coldStart")),
-                "source": meta.get("source") or "prefs",
+                "source": source,
                 "profile": meta.get("profile") or {},
                 "cards": cards,
                 "cardCount": len(cards),
                 "pushFeed": published_doc or push_feed_get(user_name),
+            })
+            return
+
+        # ========== 依標籤產生個人化片單（收藏頁用，可不登入） ==========
+        if path in ("/api/recommend/by-tags", "/api/recommend/tags"):
+            limit = int(body.get("limit") or 24)
+            raw_tags = body.get("tags") or body.get("selectedTags") or {}
+            tag_map = {}
+            if isinstance(raw_tags, dict):
+                tag_map = raw_tags
+            elif isinstance(raw_tags, list):
+                for item in raw_tags:
+                    if isinstance(item, dict) and item.get("tag"):
+                        tag_map[str(item["tag"])] = item
+                    elif isinstance(item, str) and item.strip():
+                        tag_map[item.strip()] = {"tag": item.strip(), "weight": 0.7, "kind": "mood"}
+            if not tag_map:
+                self.send_json(400, {"ok": False, "error": "缺少 tags（請先選擇感覺標籤）"})
+                return
+            movies = db_read()
+            cards, meta = build_recommend_cards_from_tags(movies, tag_map, limit=limit)
+            self.send_json(200, {
+                "ok": True,
+                "source": "tags",
+                "coldStart": bool(meta.get("coldStart")),
+                "profile": meta.get("profile") or {},
+                "cards": cards,
+                "cardCount": len(cards),
+                "tagCount": len(tag_map),
             })
             return
 
