@@ -153,6 +153,24 @@ def room_remove_member(room: dict, user_name: str) -> dict[str, Any]:
     return doc
 
 
+def room_rename_member(room: dict, old_name: str, new_name: str) -> dict[str, Any]:
+    """Rename one member in-place; keeps order and other members."""
+    doc = normalize_room(room)
+    old = str(old_name or "").strip()
+    new = str(new_name or "").strip()
+    if not old or not new:
+        raise ValueError("缺少舊名稱或新名稱")
+    if old == new:
+        return doc
+    if old not in doc["members"]:
+        raise ValueError("房間中找不到該成員")
+    if new in doc["members"]:
+        raise ValueError("新名稱已被其他成員使用")
+    doc["members"] = [new if m == old else m for m in doc["members"]]
+    doc["memberCount"] = len(doc["members"])
+    return doc
+
+
 def room_public_view(room: dict) -> dict[str, Any]:
     doc = normalize_room(room)
     return {

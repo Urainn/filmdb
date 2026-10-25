@@ -65,6 +65,7 @@ from room_sync import (
     room_merge_snapshots,
     room_public_view,
     room_remove_member,
+    room_rename_member,
     rooms_overview,
 )
 from auth_users import (
@@ -1363,6 +1364,30 @@ def room_leave(code, user_name):
             return None, "房間不存在"
         updated = room_remove_member(doc, user_name)
         # Intentional remove: do not merge-members (would resurrect the leaver)
+        saved = rooms_save_one(updated, merge_members=False)
+        return saved, None
+
+
+def room_rename(code, old_name, new_name):
+    """Rename a room member so all clients see the same display name."""
+    code = normalize_room_code(code)
+    old_name = (old_name or "").strip()
+    new_name = (new_name or "").strip()
+    if not code:
+        return None, "缺少 roomCode"
+    if not old_name or not new_name:
+        return None, "缺少舊名稱或新名稱"
+    with _get_room_lock(code):
+        doc = _room_resolve(code)
+        if not doc:
+            return None, "房間不存在"
+        if doc.get("status") == "closed":
+            return None, "房間已關閉"
+        try:
+            updated = room_rename_member(doc, old_name, new_name)
+        except ValueError as e:
+            return None, str(e)
+        # Do not merge-members: rename must not resurrect the old name from sheet races
         saved = rooms_save_one(updated, merge_members=False)
         return saved, None
 
@@ -3390,6 +3415,17 @@ class Handler(BaseHTTPRequestHandler):
             code = normalize_room_code(body.get("roomCode") or body.get("code") or body.get("room") or "")
             user_name = (body.get("userName") or "").strip()
             doc, err = room_leave(code, user_name)
+            if err:
+                self.send_json(404 if err == "房間不存在" else 400, {"ok": False, "error": err})
+                return
+            self.send_json(200, {"ok": True, "room": room_public_view(doc)})
+            return
+
+        if path == "/api/room/rename":
+            code = normalize_room_code(body.get("roomCode") or body.get("code") or body.get("room") or "")
+            old_name = (body.get("oldName") or body.get("from") or body.get("userName") or "").strip()
+            new_name = (body.get("newName") or body.get("to") or body.get("name") or "").strip()
+            doc, err = room_rename(code, old_name, new_name)
             if err:
                 self.send_json(404 if err == "房間不存在" else 400, {"ok": False, "error": err})
                 return
